@@ -174,3 +174,7 @@ tailscale serve --bg 4747
 ```
 
 Add your Mac's Tailscale name to `.env`, for example `ALLOWED_HOSTS=my-mac.tailnet-name.ts.net`, and restart. The dashboard refuses requests addressed to any other host name, because it can post as you.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
