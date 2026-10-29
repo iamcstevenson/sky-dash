@@ -1,0 +1,19 @@
+# Installed libraries (reinstall with npm install)
+node_modules/
+
+# Your database: stored posts, notification history and sign-in sessions
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# App passwords and any other local settings. Only the example is shared.
+.env
+.env.*
+!.env.example
+
+# Screenshots show other people's posts and handles
+screenshots/
+
+# macOS clutter
+.DS_Store

@@ -1,0 +1,14 @@
+{
+  "name": "skydash",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local dashboard for two Bluesky accounts",
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/server.ts"
+  },
+  "engines": { "node": ">=23.6" },
+  "dependencies": {
+    "@atproto/api": "^0.29.4"
+  }
+}

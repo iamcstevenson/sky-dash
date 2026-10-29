@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Skydash</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path fill='%231083fe' d='M7 5c3.7 2.8 7.6 8.4 9 11.4 1.4-3 5.3-8.6 9-11.4 2.6-2 6.9-3.5 6.9 1.4 0 1-.6 8.2-.9 9.4-1.1 4.1-5.3 5.2-9 4.5 6.5 1.1 8.1 4.7 4.6 8.4-6.8 7-9.7-1.7-10.5-4l-.1-.4-.1.4c-.8 2.3-3.7 11-10.5 4-3.5-3.7-1.9-7.3 4.6-8.4-3.7.7-7.9-.4-9-4.5C.6 14.6 0 7.4 0 6.4 0 1.5 4.3 3 7 5z'/></svg>">
+  <link rel="stylesheet" href="style.css">
+  <script>
+    // Apply the saved theme before the page draws, so it doesn't flash light first
+    try { const t = localStorage.getItem('theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t } catch {}
+  </script>
+</head>
+<body>
+  <header class="top">
+    <div class="brand">Skydash</div>
+    <div class="act-as" id="actAs" role="radiogroup" aria-label="Act as account"></div>
+    <div class="status" id="status" title="Collector status"></div>
+    <button class="theme-btn" id="themeBtn" type="button"></button>
+  </header>
+
+  <nav class="tabs" aria-label="Views">
+    <button class="tab active" data-tab="following">Following</button>
+    <button class="tab" data-tab="keywords">Keywords</button>
+    <button class="tab" data-tab="follows">Follows</button>
+    <button class="tab" data-tab="trending">Trending</button>
+    <button class="tab" data-tab="discover">Discover</button>
+  </nav>
+
+  <main>
+    <section id="setup" class="setup" hidden></section>
+
+    <section id="kwPanel" class="kw-panel" hidden>
+      <form id="kwForm" class="kw-form">
+        <input id="kwInput" type="text" placeholder='Add a keyword, #hashtag or "exact phrase"' maxlength="200" autocomplete="off">
+        <button type="submit" class="primary">Add</button>
+      </form>
+      <div class="kw-help">Uses Bluesky search, so you can also write things like <code>lang:en</code>, <code>-word</code> or <code>from:handle</code>. Click a keyword to show only its posts. ⚙ sets what it should mean (e.g. “cardinals” = the St. Louis Cardinals).</div>
+      <div id="kwList" class="kw-list"></div>
+      <details id="feedgenBox" class="feedgen">
+        <summary>Read this feed in the Bluesky app</summary>
+        <div id="feedgenBody"></div>
+      </details>
+    </section>
+
+    <section id="trendPanel" class="trend-panel" hidden>
+      <div class="trend-controls">
+        <div class="seg" id="trHours">
+          <button data-value="6">6 hours</button>
+          <button data-value="24" class="on">24 hours</button>
+          <button data-value="72">3 days</button>
+        </div>
+        <div class="seg" id="trWho"></div>
+        <label class="check" title="Only count posts in English"><input type="checkbox" class="english-only"> English only</label>
+      </div>
+      <div id="trNote" class="fv-note"></div>
+      <div id="trHead" class="trend-head" hidden></div>
+      <div id="trList" class="trend-list"></div>
+    </section>
+
+    <section id="discoverView" class="discover-view" hidden>
+      <div class="trend-controls">
+        <div class="seg" id="dvKeyword"></div>
+        <div class="seg" id="dvMode">
+          <button data-value="all" class="on">Everyone</button>
+          <button data-value="posts">Mostly posts</button>
+          <button data-value="replies">Mostly replies</button>
+        </div>
+        <button class="secondary" id="dvRefresh" title="Re-read who your experts follow and how much candidates post">Refresh signals</button>
+      </div>
+      <div id="dvNote" class="fv-note"></div>
+      <div id="dvAuditions"></div>
+      <div id="dvList" class="trend-list"></div>
+      <div id="dvMore" class="feed-end"></div>
+    </section>
+
+    <section id="followsView" class="follows-view" hidden>
+      <div id="fvNote" class="fv-note"></div>
+      <div class="fv-controls">
+        <div class="seg" id="fvOverlap"></div>
+        <input id="fvSearch" type="search" placeholder="Search name or handle" autocomplete="off">
+      </div>
+      <div class="fv-quick" id="fvQuick">
+        <label class="chip"><input type="checkbox" data-q="quiet"> Quiet 14+ days</label>
+        <label class="chip"><input type="checkbox" data-q="low"> At most <input type="number" id="fvLowN" value="3" min="0" max="999"> posts + replies in 14 days</label>
+        <label class="chip"><input type="checkbox" data-q="noback"> Doesn't follow back</label>
+        <label class="chip"><input type="checkbox" data-q="never"> Never interacted with you</label>
+        <label class="chip"><input type="checkbox" data-q="reposty"> Mostly reposts</label>
+        <label class="chip"><input type="checkbox" data-q="muted"> Muted</label>
+      </div>
+      <div class="fv-bulk" id="fvBulk" hidden>
+        <b id="fvCount"></b>
+        <button class="danger-btn" data-bulk="unfollow">Unfollow…</button>
+        <button class="secondary" data-bulk="list">Move to list…</button>
+        <button class="secondary" data-bulk="mute">Mute…</button>
+        <button class="secondary" data-bulk="follow">Follow from…</button>
+        <button class="link-btn" data-bulk="clear">Clear</button>
+      </div>
+      <div class="table-wrap">
+        <table class="fv-table">
+          <thead><tr>
+            <th><input type="checkbox" id="fvAll" aria-label="Select all shown"></th>
+            <th data-sort="name">Account</th>
+            <th data-sort="followedBy" title="Which of your accounts follow them">By</th>
+            <th data-sort="posts" class="num" title="Posts in the last 14 days">Posts</th>
+            <th data-sort="replies" class="num" title="Replies in the last 14 days">Replies</th>
+            <th data-sort="reposts" class="num" title="Reposts in the last 14 days">Reposts</th>
+            <th data-sort="repostShare" class="num" title="Share of their activity that is reposts">Repost %</th>
+            <th data-sort="lastActiveMs" class="num" title="Days since their last post or repost">Last active</th>
+            <th data-sort="followsBack" title="Which of your accounts they follow">Follows you</th>
+            <th data-sort="interactions" class="num" title="Likes, replies, reposts, quotes and mentions of your accounts">Interacted</th>
+            <th data-sort="followersCount" class="num">Followers</th>
+            <th></th>
+          </tr></thead>
+          <tbody id="fvBody"></tbody>
+        </table>
+      </div>
+      <div id="fvMore" class="feed-end"></div>
+    </section>
+
+    <div class="filters" id="filters">
+      <div class="seg" data-filter="type">
+        <button data-value="all" class="on">All</button>
+        <button data-value="posts">Posts</button>
+        <button data-value="replies">Replies</button>
+      </div>
+      <div class="seg" data-filter="who" id="whoFilter"></div>
+      <span class="author-chip" id="authorChip" hidden></span>
+      <label class="check" title="Hide posts in other languages"><input type="checkbox" class="english-only"> English only</label>
+      <label class="check" id="hideFollowedWrap" hidden><input type="checkbox" id="hideFollowed"> Hide people I follow</label>
+      <label class="check" id="showHiddenWrap" hidden title="See what your context rules hid, and why"><input type="checkbox" id="showHidden"> Show hidden posts</label>
+      <button class="compose-btn" id="composeBtn">New post</button>
+    </div>
+
+    <button class="new-banner" id="newBanner" hidden></button>
+    <div id="feed" class="feed"></div>
+    <div id="feedEnd" class="feed-end"></div>
+  </main>
+
+  <dialog id="threadDialog" class="sheet">
+    <div class="sheet-head"><span>Thread</span><button class="icon-btn" data-close aria-label="Close">✕</button></div>
+    <div id="threadBody" class="sheet-body"></div>
+  </dialog>
+
+  <dialog id="composeDialog" class="sheet compose">
+    <form method="dialog" id="composeForm">
+      <div class="sheet-head"><span id="composeTitle">New post</span><button class="icon-btn" type="button" data-close aria-label="Close">✕</button></div>
+      <div class="sheet-body">
+        <div id="composeContext"></div>
+        <textarea id="composeText" rows="5" placeholder="Write something… (you can also paste or drop images or a video here)" maxlength="3000"></textarea>
+        <div id="composeImages" class="compose-images"></div>
+        <div id="composeVideo" class="compose-video" hidden></div>
+        <div class="compose-foot">
+          <label class="secondary add-images" title="Add up to 4 images">🖼 Add images
+            <input type="file" id="composeFiles" accept="image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif" multiple hidden></label>
+          <label class="secondary add-video" title="Add one video (up to 3 minutes, 100 MB)">🎬 Add video
+            <input type="file" id="composeVideoFile" accept="video/mp4,video/quicktime,video/webm,video/mpeg" hidden></label>
+          <label>Posting as <select id="composeAs"></select></label>
+          <span id="composeCount" class="count">300</span>
+          <button type="submit" class="primary" id="composeSend">Post</button>
+        </div>
+        <div id="composeError" class="error"></div>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="actionDialog" class="sheet">
+    <div class="sheet-head"><span id="adTitle"></span><button class="icon-btn" data-close aria-label="Close">✕</button></div>
+    <div class="sheet-body" id="adBody"></div>
+  </dialog>
+
+  <div id="profileCard" class="profile-card" role="dialog" aria-label="Profile" hidden></div>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>

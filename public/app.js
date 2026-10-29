@@ -1,0 +1,2169 @@
+'use strict'
+
+const $ = (sel, root = document) => root.querySelector(sel)
+const LETTERS = { 1: 'A', 2: 'B' }
+
+const state = {
+  accounts: [], // signed-in accounts: { slot, handle, did }
+  actAs: Number(safeGet('actAs')) || 1,
+  view: ['keywords', 'follows', 'trending', 'discover'].includes(safeGet('view')) ? safeGet('view') : 'following',
+  author: null, // { did, handle } when the Following tab shows one person's posts
+  englishOnly: safeGet('englishOnly') !== '0', // on unless turned off
+  kw: { list: [], selected: new Set(), hideFollowed: false, showHidden: false, hours: 48, polling: false },
+  type: 'all',
+  who: 'all',
+  cursor: null,
+  newest: 0,
+  loading: false,
+  done: false,
+  posts: new Map(), // uri -> { post, viewer } for every rendered card
+}
+
+function safeGet(k) { try { return localStorage.getItem(k) } catch { return null } }
+function safeSet(k, v) { try { localStorage.setItem(k, v) } catch {} }
+
+async function api(path, body) {
+  const res = await fetch(path, body
+    ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }
+    : undefined)
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`)
+  return data
+}
+
+// action: optional { label, run } shown as a button (e.g. Undo); the toast then stays up longer
+function toast(msg, action) {
+  const t = $('#toast')
+  t.textContent = msg
+  if (action) {
+    const b = document.createElement('button')
+    b.textContent = action.label
+    b.onclick = () => {
+      t.hidden = true
+      action.run()
+    }
+    t.append(b)
+  }
+  t.hidden = false
+  clearTimeout(toast.timer)
+  toast.timer = setTimeout(() => (t.hidden = true), action ? 10_000 : 3500)
+}
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
+}
+
+function acctName(slot) {
+  const a = state.accounts.find((x) => x.slot === Number(slot))
+  return a ? `@${a.handle}` : `account ${LETTERS[slot] ?? slot}`
+}
+
+function badge(slot, title) {
+  return `<span class="acct-badge acct-${slot}" title="${esc(title ?? acctName(slot))}">${LETTERS[slot] ?? slot}</span>`
+}
+
+function ago(iso) {
+  const s = (Date.now() - Date.parse(iso)) / 1000
+  if (s < 60) return 'now'
+  if (s < 3600) return `${Math.floor(s / 60)}m`
+  if (s < 86400) return `${Math.floor(s / 3600)}h`
+  return `${Math.floor(s / 86400)}d`
+}
+
+function postUrl(post) {
+  const rkey = post.uri.split('/').pop()
+  return `https://bsky.app/profile/${post.author.handle || post.author.did}/post/${rkey}`
+}
+
+// Rich text: facets index into the UTF-8 bytes of the text, not JS string positions
+const enc = new TextEncoder()
+const dec = new TextDecoder()
+function renderText(text, facets) {
+  if (!text) return ''
+  if (!facets?.length) return esc(text)
+  const bytes = enc.encode(text)
+  let out = ''
+  let pos = 0
+  for (const f of [...facets].sort((a, b) => a.index.byteStart - b.index.byteStart)) {
+    const { byteStart, byteEnd } = f.index
+    if (byteStart < pos || byteEnd > bytes.length) continue
+    out += esc(dec.decode(bytes.slice(pos, byteStart)))
+    const inner = esc(dec.decode(bytes.slice(byteStart, byteEnd)))
+    const feat = f.features?.[0] ?? {}
+    let href = null
+    if (feat.$type === 'app.bsky.richtext.facet#link') href = feat.uri
+    else if (feat.$type === 'app.bsky.richtext.facet#mention') href = `https://bsky.app/profile/${feat.did}`
+    else if (feat.$type === 'app.bsky.richtext.facet#tag') href = `https://bsky.app/hashtag/${encodeURIComponent(feat.tag)}`
+    out += href && /^https?:/i.test(href) ? `<a href="${esc(href)}" target="_blank" rel="noopener">${inner}</a>` : inner
+    pos = byteEnd
+  }
+  return out + esc(dec.decode(bytes.slice(pos)))
+}
+
+const ADULT = new Set(['porn', 'sexual', 'nudity', 'graphic-media', 'gore'])
+function isSensitive(labels) {
+  return (labels ?? []).some((l) => ADULT.has(l.val))
+}
+
+function renderImages(images, blur) {
+  if (!images?.length) return ''
+  return `<div class="images ${images.length === 1 ? 'one' : ''}">${images
+    .map((i) => `<a href="${esc(i.fullsize)}" target="_blank" rel="noopener"><img loading="lazy" src="${esc(i.thumb)}" alt="${esc(i.alt)}" title="${esc(i.alt)}" class="${blur ? 'blurred' : ''}"></a>`)
+    .join('')}</div>`
+}
+
+function renderMedia(embed, blur, post) {
+  if (!embed) return ''
+  switch (embed.$type) {
+    case 'app.bsky.embed.images#view':
+      return renderImages(embed.images, blur)
+    case 'app.bsky.embed.external#view': {
+      const e = embed.external
+      let host = ''
+      try { host = new URL(e.uri).hostname } catch {}
+      return `<a class="ext" href="${esc(e.uri)}" target="_blank" rel="noopener">
+        ${e.thumb ? `<img loading="lazy" src="${esc(e.thumb)}" alt="">` : ''}
+        <div><b>${esc(e.title || e.uri)}</b><small>${esc(e.description)}</small><small>${esc(host)}</small></div></a>`
+    }
+    case 'app.bsky.embed.video#view':
+      return `<a class="video" href="${esc(post ? postUrl(post) : '#')}" target="_blank" rel="noopener" title="Play on bsky.app">
+        ${embed.thumbnail ? `<img loading="lazy" src="${esc(embed.thumbnail)}" alt="${esc(embed.alt)}" class="${blur ? 'blurred' : ''}">` : 'Video'}<span>▶</span></a>`
+    default:
+      return ''
+  }
+}
+
+function renderQuote(rec) {
+  if (!rec) return ''
+  if (rec.$type === 'app.bsky.embed.record#viewRecord') {
+    const media = (rec.embeds ?? []).map((e) => renderMedia(e, isSensitive(rec.labels), { uri: rec.uri, author: rec.author })).join('')
+    return `<div class="quote" data-open-thread="${esc(rec.uri)}">
+      <div class="meta"><img class="avatar" style="width:18px;height:18px" src="${esc(rec.author.avatar ?? '')}" alt="">
+        <span class="name">${esc(rec.author.displayName || rec.author.handle)}</span>
+        <span class="handle">@${esc(rec.author.handle)}</span><span class="time">· ${ago(rec.indexedAt)}</span></div>
+      <div class="text">${renderText(rec.value?.text, rec.value?.facets)}</div>${media}</div>`
+  }
+  if (rec.$type === 'app.bsky.embed.record#viewNotFound') return '<div class="quote missing">Quoted post was deleted</div>'
+  if (rec.$type === 'app.bsky.embed.record#viewBlocked') return '<div class="quote missing">Quoted post is from a blocked account</div>'
+  if (rec.$type === 'app.bsky.embed.record#viewDetached') return '<div class="quote missing">The author removed this quote</div>'
+  if (rec.$type === 'app.bsky.feed.defs#generatorView') return `<div class="quote">Feed: <b>${esc(rec.displayName)}</b></div>`
+  if (rec.$type === 'app.bsky.graph.defs#listView') return `<div class="quote">List: <b>${esc(rec.name)}</b></div>`
+  return ''
+}
+
+function renderEmbed(post) {
+  const embed = post.embed
+  if (!embed) return ''
+  const blur = isSensitive(post.labels)
+  if (embed.$type === 'app.bsky.embed.record#view') return renderQuote(embed.record)
+  if (embed.$type === 'app.bsky.embed.recordWithMedia#view') return renderMedia(embed.media, blur, post) + renderQuote(embed.record?.record)
+  return renderMedia(embed, blur, post)
+}
+
+// One post's header, text and embeds. `small` is used for reply context above a post.
+function renderPost(post, { small = false, followedBy = [] } = {}) {
+  if (!post || post.notFound) return `<div class="missing">Post not available (deleted or hidden)</div>`
+  const a = post.author
+  return `<div class="post ${small ? 'small' : ''}">
+    <button class="avatar-btn" data-profile="${esc(a.did)}" aria-label="Profile of ${esc(a.displayName || a.handle)}"><img class="avatar" loading="lazy" src="${esc(a.avatar ?? '')}" alt=""></button>
+    <div class="post-body">
+      <div class="meta">
+        <span class="name" data-profile="${esc(a.did)}">${esc(a.displayName || a.handle)}</span>
+        <span class="handle" data-profile="${esc(a.did)}">@${esc(a.handle)}</span>
+        ${followedBy.length ? `<span class="badges">${followedBy.map((s) => badge(s, `Followed by ${acctName(s)}`)).join('')}</span>` : ''}
+        <a class="time" href="${esc(postUrl(post))}" target="_blank" rel="noopener" title="${esc(new Date(post.indexedAt).toLocaleString())}">· ${ago(post.record?.createdAt ?? post.indexedAt)}</a>
+      </div>
+      <div class="text">${renderText(post.record?.text, post.record?.facets)}</div>
+      ${renderEmbed(post)}
+    </div></div>`
+}
+
+function whoDid(viewer, key) {
+  return Object.entries(viewer ?? {}).filter(([, v]) => v?.[key]).map(([slot]) => Number(slot))
+}
+
+function renderActions(post, viewer) {
+  const likedBy = whoDid(viewer, 'like')
+  const repostedBy = whoDid(viewer, 'repost')
+  const mine = viewer?.[state.actAs] ?? {}
+  const dots = (slots) => (slots.length ? `<span class="who">${slots.map((s) => badge(s)).join('')}</span>` : '')
+  return `<div class="actions" data-uri="${esc(post.uri)}">
+    <button class="act" data-act="reply" title="Reply">💬 ${post.replyCount ?? 0}</button>
+    <button class="act ${mine.repost ? 'reposted' : ''}" data-act="repost" title="Repost as ${esc(acctName(state.actAs))}">🔁 ${post.repostCount ?? 0}${dots(repostedBy)}</button>
+    <button class="act" data-act="quote" title="Quote">❝ ${post.quoteCount ?? 0}</button>
+    <button class="act ${mine.like ? 'liked' : ''}" data-act="like" title="Like as ${esc(acctName(state.actAs))}">${mine.like ? '♥' : '♡'} ${post.likeCount ?? 0}${dots(likedBy)}</button>
+    <button class="act right" data-act="thread" title="Show whole thread">Thread</button>
+  </div>`
+}
+
+function renderCard(item) {
+  state.posts.set(item.post.uri, { post: item.post, viewer: item.viewer })
+  let ctx = ''
+  if (item.root) {
+    ctx += `<div class="ctx">${renderPost(item.root, { small: true })}</div>`
+    ctx += `<div class="ctx-gap"><button data-open-thread="${esc(item.post.uri)}">⋯ view full thread</button></div>`
+  }
+  if (item.parent) ctx += `<div class="ctx">${renderPost(item.parent, { small: true })}</div>`
+  const tags = item.verdicts?.length ? renderVerdicts(item) : item.keywords?.length
+    ? `<div class="kw-tags">${item.keywords.map((id) => state.kw.list.find((k) => k.id === id)).filter(Boolean)
+        .map((k) => `<span class="kw-tag">${esc(k.query)}</span>`).join('')}</div>`
+    : ''
+  return `<article class="card" data-card="${esc(item.post.uri)}">
+    ${tags}${ctx}${renderPost(item.post, { followedBy: item.followedBy })}
+    <div class="acts">${renderActions(item.post, item.viewer)}</div></article>`
+}
+
+// Words and "quoted phrases" from a search query, minus operators like lang:en or -word
+function searchTerms(query) {
+  const terms = []
+  const rest = query.replace(/"([^"]+)"/g, (_, phrase) => (terms.push(phrase), ' '))
+  for (const w of rest.split(/\s+/)) {
+    if (!w || w.startsWith('-') || w.includes(':') || /^(AND|OR|NOT)$/.test(w)) continue
+    terms.push(w.replace(/^#/, ''))
+  }
+  return terms.filter((t) => t.length > 1)
+}
+
+// Wraps keyword matches in <mark> inside the post text (not in links or the reply context)
+function highlight(card, ids) {
+  highlightTerms(card, ids.flatMap((id) => searchTerms(state.kw.list.find((k) => k.id === id)?.query ?? '')))
+}
+
+// Wraps each of `terms` (whole words, any case) in <mark> inside the post text
+function highlightTerms(card, terms) {
+  if (!terms.length) return
+  const re = new RegExp(`(${terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'gi')
+  const textEl = card?.querySelector(':scope > .post .text')
+  if (!textEl) return
+  const walker = document.createTreeWalker(textEl, NodeFilter.SHOW_TEXT)
+  const nodes = []
+  while (walker.nextNode()) nodes.push(walker.currentNode)
+  for (const node of nodes) {
+    if (!re.test(node.nodeValue)) continue
+    re.lastIndex = 0
+    const span = document.createElement('span')
+    span.innerHTML = esc(node.nodeValue).replace(re, '<mark>$1</mark>')
+    node.replaceWith(...span.childNodes)
+  }
+}
+
+// ---------- feed ----------
+
+const VIEWS = {
+  following: {
+    feed: '/api/feed',
+    count: '/api/feed/new',
+    query: () => {
+      const q = new URLSearchParams({ type: state.type, who: state.who })
+      if (state.author) q.set('author', state.author.did)
+      if (state.englishOnly) q.set('lang', 'en')
+      return q
+    },
+    done: () => state.author
+      ? `That's everything from @${state.author.handle} in the last 14 days.`
+      : `That's everything from the last ${state.feedHours ?? 72} hours.`,
+    empty: () => 'No posts yet. If the dashboard just started, the backfill may still be running.',
+  },
+  keywords: {
+    feed: '/api/keywords/feed',
+    count: '/api/keywords/new',
+    query: () => new URLSearchParams({
+      type: state.type,
+      ids: [...state.kw.selected].join(','),
+      hideFollowed: state.kw.hideFollowed ? '1' : '0',
+      ...(state.kw.showHidden ? { show: 'filtered' } : {}),
+      ...(state.englishOnly ? { lang: 'en' } : {}),
+    }),
+    done: () => `That's every match from the last ${state.kw.hours} hours.`,
+    empty: () => state.kw.list.length
+      ? (state.kw.polling ? 'Searching…' : state.kw.showHidden ? 'Nothing was hidden by your context rules.' : `No matches in the last ${state.kw.hours} hours.`)
+      : 'Add a keyword above to start.',
+  },
+}
+VIEWS.trending = {
+  feed: '/api/trending/posts',
+  count: null,
+  query: () => new URLSearchParams({ term: tr.topic?.term ?? '', hours: tr.hours, who: tr.who, ...(state.englishOnly ? { lang: 'en' } : {}) }),
+  done: () => `That's every post about this from the last ${hoursLabel(tr.hours)}.`,
+  empty: () => 'No posts found.',
+}
+const view = () => VIEWS[state.view]
+
+let loadSeq = 0
+async function loadFeed(reset = false) {
+  if (!reset && (state.loading || state.done)) return
+  // A reset (tab or filter change) supersedes any page still loading; its result is dropped
+  const seq = ++loadSeq
+  state.loading = true
+  const end = $('#feedEnd')
+  if (reset) {
+    state.cursor = null
+    state.done = false
+    state.posts.clear()
+    $('#feed').innerHTML = ''
+    $('#newBanner').hidden = true
+  }
+  end.textContent = 'Loading…'
+  try {
+    const v = view()
+    const q = v.query()
+    if (state.cursor) q.set('before', state.cursor)
+    const data = await api(`${v.feed}?${q}`)
+    if (seq !== loadSeq) return
+    if (reset) state.newest = data.items[0]?.sortAt ?? Date.now()
+    const feed = $('#feed')
+    const before = feed.children.length
+    feed.insertAdjacentHTML('beforeend', data.items.map(renderCard).join(''))
+    data.items.forEach((item, i) => item.keywords && highlight(feed.children[before + i], item.keywords))
+    if (state.view === 'trending' && tr.topic) {
+      const terms = topicTerms(tr.topic)
+      data.items.forEach((_, i) => highlightTerms(feed.children[before + i], terms))
+    }
+    state.cursor = data.cursor
+    state.done = !data.cursor
+    end.textContent = state.done ? (feed.children.length ? v.done() : v.empty()) : ''
+  } catch (err) {
+    if (seq === loadSeq) end.textContent = `Couldn't load posts: ${err.message}`
+  } finally {
+    if (seq === loadSeq) state.loading = false
+  }
+}
+
+new IntersectionObserver((entries) => {
+  if (entries.some((e) => e.isIntersecting) && state.cursor) loadFeed()
+}, { rootMargin: '800px' }).observe($('#feedEnd'))
+
+async function checkNew() {
+  if (!state.newest || document.hidden || !view().count) return
+  try {
+    const v = view()
+    const q = v.query()
+    q.set('after', state.newest)
+    const { count } = await api(`${v.count}?${q}`)
+    if (v !== view()) return
+    const b = $('#newBanner')
+    b.hidden = count === 0
+    b.textContent = `Show ${count} new post${count === 1 ? '' : 's'}`
+  } catch {}
+}
+$('#newBanner').addEventListener('click', () => {
+  loadFeed(true)
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+})
+
+document.querySelectorAll('.seg').forEach((seg) => {
+  seg.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-value]')
+    if (!btn) return
+    seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === btn))
+    state[seg.dataset.filter] = btn.dataset.value
+    loadFeed(true)
+  })
+})
+
+// ---------- tabs ----------
+
+function showView(name) {
+  state.view = name
+  safeSet('view', name)
+  if (name !== 'following') state.author = null
+  document.querySelectorAll('.tab[data-tab]').forEach((t) => t.classList.toggle('active', t.dataset.tab === name))
+  const isKeywords = name === 'keywords'
+  const isFollows = name === 'follows'
+  const isTrending = name === 'trending'
+  const isDiscover = name === 'discover'
+  $('#discoverView').hidden = !isDiscover
+  $('#kwPanel').hidden = !isKeywords
+  $('#followsView').hidden = !isFollows
+  $('#trendPanel').hidden = !isTrending
+  document.body.classList.toggle('wide', isFollows)
+  // Trending shows its own controls; its post list only appears once a topic is picked
+  $('#filters').hidden = isFollows || isTrending || isDiscover
+  const showFeed = !isFollows && !isDiscover && !(isTrending && !tr.topic)
+  $('#feed').hidden = !showFeed
+  $('#feedEnd').hidden = !showFeed
+  if (isFollows || isTrending || isDiscover) $('#newBanner').hidden = true
+  $('#hideFollowedWrap').hidden = !isKeywords
+  $('#showHiddenWrap').hidden = !isKeywords
+  $('#whoFilter').hidden = isKeywords || !!state.author || state.accounts.length < 2
+  renderAuthorChip()
+  if (isFollows) return loadFollows()
+  if (isDiscover) return loadDiscover()
+  if (isTrending) {
+    loadTrending()
+    if (tr.topic) loadFeed(true)
+    return
+  }
+  if (isKeywords) loadKeywords()
+  loadFeed(true)
+}
+
+// Following tab narrowed to one person, opened from the Follows tab
+function showAuthor(did, handle) {
+  state.author = { did, handle }
+  showView('following')
+  window.scrollTo({ top: 0 })
+}
+
+function renderAuthorChip() {
+  const chip = $('#authorChip')
+  chip.hidden = !state.author
+  if (state.author) {
+    chip.innerHTML = `Only @${esc(state.author.handle)} <button aria-label="Show everyone">✕</button>`
+    chip.querySelector('button').onclick = () => {
+      state.author = null
+      showView('following')
+    }
+  }
+}
+document.querySelectorAll('.tab[data-tab]').forEach((t) => t.addEventListener('click', () => {
+  state.author = null
+  if (t.dataset.tab !== 'trending' || state.view === 'trending') tr.topic = null
+  showView(t.dataset.tab)
+}))
+
+// ---------- keywords ----------
+
+function renderKeywords() {
+  const el = $('#kwList')
+  if (!state.kw.list.length) {
+    el.innerHTML = '<span class="kw-empty">No keywords yet.</span>'
+    return
+  }
+  el.innerHTML = state.kw.list.map((k) => {
+    const status = k.error
+      ? `<span class="warn" title="${esc(k.error)}">⚠</span>`
+      : k.lastPollMs === 0 && k.enabled ? '<span class="n">searching…</span>'
+      : `<span class="n" title="${k.capped ? 'Very common keyword: only the newest 2,000 matches per check are kept. ' : ''}${k.count.toLocaleString()} shown, ${k.hidden.toLocaleString()} hidden by your context rules (last ${state.kw.hours} hours)">${k.count.toLocaleString()}${k.capped ? '+' : ''}${k.hidden ? `<span class="hid"> · ${k.hidden.toLocaleString()} hidden</span>` : ''}</span>`
+    return `<span class="kw-chip ${state.kw.selected.has(k.id) ? 'selected' : ''} ${k.enabled ? '' : 'off'}" data-kw="${k.id}">
+      <button class="kw-name" data-kw-act="select" title="${esc(k.query)}: click to show only this keyword">${esc(k.query)}</button>${status}
+      <button data-kw-act="rules" class="${k.hasRules ? 'has-rules' : ''}" title="${k.hasRules ? 'Edit' : 'Set'} what “${esc(k.query)}” should mean">⚙</button>
+      <button data-kw-act="toggle" title="${k.enabled ? 'Pause' : 'Resume'} this keyword">${k.enabled ? '❚❚' : '▶'}</button>
+      <button data-kw-act="feed" title="${k.inFeed ? 'Included in' : 'Left out of'} your Bluesky custom feed">${k.inFeed ? '📡' : '<span style="opacity:.35">📡</span>'}</button>
+      <button data-kw-act="remove" title="Remove">✕</button></span>`
+  }).join('')
+}
+
+async function loadKeywords() {
+  try {
+    const data = await api('/api/keywords')
+    state.kw.list = data.keywords
+    state.kw.hours = data.hours
+    const wasPolling = state.kw.polling
+    state.kw.polling = data.polling || data.keywords.some((k) => k.enabled && k.lastPollMs === 0)
+    for (const id of state.kw.selected) if (!data.keywords.some((k) => k.id === id)) state.kw.selected.delete(id)
+    renderKeywords()
+    // When a search finishes while the feed is empty, show the results
+    if (wasPolling && !state.kw.polling && state.view === 'keywords' && !$('#feed').children.length) loadFeed(true)
+  } catch (err) {
+    $('#kwList').textContent = `Couldn't load keywords: ${err.message}`
+  }
+}
+
+$('#kwForm').addEventListener('submit', async (e) => {
+  e.preventDefault()
+  const input = $('#kwInput')
+  const query = input.value.trim()
+  if (!query) return
+  try {
+    await api('/api/keywords/add', { query })
+    input.value = ''
+    toast(`Searching the last ${state.kw.hours} hours for "${query}"…`)
+    await loadKeywords()
+  } catch (err) {
+    toast(err.message)
+  }
+})
+
+$('#kwList').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-kw-act]')
+  if (!btn) return
+  const id = Number(btn.closest('[data-kw]').dataset.kw)
+  const k = state.kw.list.find((x) => x.id === id)
+  try {
+    switch (btn.dataset.kwAct) {
+      case 'select':
+        state.kw.selected.has(id) ? state.kw.selected.delete(id) : state.kw.selected.add(id)
+        renderKeywords()
+        return loadFeed(true)
+      case 'toggle':
+        await api('/api/keywords/update', { id, enabled: !k.enabled })
+        break
+      case 'feed':
+        await api('/api/keywords/update', { id, inFeed: !k.inFeed })
+        toast(k.inFeed ? `"${k.query}" left out of your Bluesky feed` : `"${k.query}" added to your Bluesky feed`)
+        break
+      case 'rules':
+        return openRules(k)
+      case 'remove':
+        if (!confirm(`Remove "${k.query}" and its saved matches?`)) return
+        await api('/api/keywords/remove', { id })
+        break
+    }
+    await loadKeywords()
+    loadFeed(true)
+  } catch (err) {
+    toast(err.message)
+  }
+})
+
+$('#hideFollowed').addEventListener('change', (e) => {
+  state.kw.hideFollowed = e.target.checked
+  loadFeed(true)
+})
+
+// ---------- keyword context rules ----------
+
+// Under a keyword post: why it's shown or hidden for each keyword, with buttons to always/never show the author
+function renderVerdicts(item) {
+  const handle = item.post.author.handle
+  const did = item.post.author.did
+  const rows = item.verdicts
+    .filter((v) => state.kw.showHidden ? !v.kept : v.kept)
+    .map((v) => {
+      const k = state.kw.list.find((x) => x.id === v.id)
+      if (!k) return ''
+      const btn = v.kept
+        ? `<button class="link-btn bad" data-kwauthor="blocked" data-kw-id="${k.id}" data-did="${esc(did)}" data-handle="${esc(handle)}" title="Hide posts by @${esc(handle)} from “${esc(k.query)}”">Not about ${esc(k.query)}? Never show @${esc(handle)}</button>`
+        : `<button class="link-btn" data-kwauthor="trusted" data-kw-id="${k.id}" data-did="${esc(did)}" data-handle="${esc(handle)}" title="Always show posts by @${esc(handle)} for “${esc(k.query)}”">Always show @${esc(handle)} here</button>`
+      return `<div class="kw-verdict"><span class="kw-tag ${v.kept ? '' : 'hidden-tag'}">${esc(k.query)}</span>
+        <span class="why">${v.kept ? '' : 'Hidden: '}${esc(v.reason)}</span>${btn}</div>`
+    })
+    .join('')
+  return rows ? `<div class="kw-tags kw-verdicts">${rows}</div>` : ''
+}
+
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-kwauthor]')
+  if (!b) return
+  const id = Number(b.dataset.kwId)
+  const k = state.kw.list.find((x) => x.id === id)
+  const verdict = b.dataset.kwauthor
+  b.disabled = true
+  try {
+    await api('/api/keywords/author', { id, did: b.dataset.did, verdict })
+    toast(verdict === 'trusted' ? `Always showing @${b.dataset.handle} for “${k.query}”` : `Hiding @${b.dataset.handle} from “${k.query}”`, {
+      label: 'Undo',
+      run: async () => {
+        await api('/api/keywords/author', { id, did: b.dataset.did, verdict: null })
+        await loadKeywords()
+        loadFeed(true)
+      },
+    })
+    await loadKeywords()
+    loadFeed(true)
+  } catch (err) {
+    toast(err.message)
+    b.disabled = false
+  }
+})
+
+$('#showHidden').addEventListener('change', (e) => {
+  state.kw.showHidden = e.target.checked
+  loadFeed(true)
+})
+
+async function openRules(k) {
+  const dlg = $('#actionDialog')
+  const body = $('#adBody')
+  $('#adTitle').textContent = `What should “${k.query}” mean?`
+  body.innerHTML = '<div class="dim">Loading…</div>'
+  dlg.showModal()
+  let r
+  try {
+    r = await api(`/api/keywords/rules?id=${k.id}`)
+  } catch (err) {
+    body.innerHTML = `<div class="error">${esc(err.message)}</div>`
+    return
+  }
+  const people = (list, verdict) => list.length
+    ? list.map((p) => `<span class="person">@${esc(p.handle)} <button class="link-btn" data-rule-person="${esc(p.did)}" data-verdict="${verdict}" title="Remove">✕</button></span>`).join('')
+    : '<span class="dim">None yet</span>'
+  const suggested = r.suggested.length
+    ? `<div class="rules-block"><b>Suggested “always show” accounts</b><small>Their recent posts keep passing your rules</small>
+        <div class="people">${r.suggested.map((p) => `<span class="person">@${esc(p.handle)} <span class="dim">(${p.kept})</span>
+          <button class="link-btn" data-rule-trust="${esc(p.did)}">Always show</button></span>`).join('')}</div></div>`
+    : ''
+  body.innerHTML = `
+    <p class="dim rules-intro">Posts matching “${esc(k.query)}” are shown only if they mention one of the first list and none of the second.
+      Separate words with commas or new lines. Words in ALL CAPS (like UK or SEC) must match exactly; others ignore case.</p>
+    <label class="rules-block"><b>Must mention one of</b><small>Leave empty to keep every match</small>
+      <textarea id="rulesMust" rows="4">${esc(r.must.join(', '))}</textarea></label>
+    <label class="rules-block"><b>Hide if it mentions</b>
+      <textarea id="rulesExclude" rows="4">${esc(r.exclude.join(', '))}</textarea></label>
+    <div class="rules-block"><b>Always show these accounts</b><div class="people">${people(r.trusted, 'trusted')}</div></div>
+    <div class="rules-block"><b>Never show these accounts</b><div class="people">${people(r.blocked, 'blocked')}</div></div>
+    ${suggested}
+    <div class="ad-foot"><button class="secondary" data-close>Cancel</button><button class="primary" id="rulesSave">Save</button></div>`
+
+  const refresh = async () => {
+    await loadKeywords()
+    loadFeed(true)
+  }
+  body.querySelectorAll('[data-rule-person]').forEach((x) => (x.onclick = async () => {
+    await api('/api/keywords/author', { id: k.id, did: x.dataset.rulePerson, verdict: null })
+    x.closest('.person').remove()
+    refresh()
+  }))
+  body.querySelectorAll('[data-rule-trust]').forEach((x) => (x.onclick = async () => {
+    await api('/api/keywords/author', { id: k.id, did: x.dataset.ruleTrust, verdict: 'trusted' })
+    x.replaceWith(Object.assign(document.createElement('span'), { className: 'dim', textContent: 'added' }))
+    refresh()
+  }))
+  $('#rulesSave').onclick = async () => {
+    try {
+      await api('/api/keywords/rules', { id: k.id, must: $('#rulesMust').value, exclude: $('#rulesExclude').value })
+      dlg.close()
+      toast(`Saved rules for “${k.query}”`)
+      refresh()
+    } catch (err) {
+      toast(err.message)
+    }
+  }
+}
+
+// ---------- custom Bluesky feed ----------
+
+async function renderFeedgen() {
+  const body = $('#feedgenBody')
+  let info
+  try {
+    info = await api('/api/feedgen')
+  } catch (err) {
+    body.textContent = err.message
+    return
+  }
+  if (!info.hostname) {
+    body.innerHTML = `<p>Publish the keywords marked 📡 as a custom feed you can pin in the official Bluesky app. Bluesky's servers need to reach this Mac, so it needs a public address. The free option that keeps the same address is Tailscale Funnel:</p>
+      <ol>
+        <li>Install Tailscale and sign in.</li>
+        <li>Run <code>tailscale funnel --bg ${info.port}</code>. It prints an address like <code>your-mac.tail1234.ts.net</code>.</li>
+        <li>Add <code>FEEDGEN_HOSTNAME=your-mac.tail1234.ts.net</code> to <code>.env</code> and restart Skydash.</li>
+      </ol>
+      <p>Only the feed is made public, on port ${info.port}. The dashboard stays private. Anyone with the feed link can see which posts match your keywords.</p>`
+    return
+  }
+  if (info.uri) {
+    body.innerHTML = `<p>Your feed is published. Open it in Bluesky and pin it: <a href="${esc(info.appUrl)}" target="_blank" rel="noopener">${esc(info.appUrl)}</a></p>
+      <p>It includes the keywords marked 📡 and only works while Skydash and the Funnel are running.</p>
+      <div class="row"><button class="secondary" id="fgUnpublish">Unpublish</button></div>`
+    $('#fgUnpublish').onclick = async () => {
+      if (!confirm('Remove the custom feed from your Bluesky profile?')) return
+      try { await api('/api/feedgen/unpublish', {}); toast('Feed removed'); renderFeedgen() } catch (err) { toast(err.message) }
+    }
+    return
+  }
+  body.innerHTML = `<p>Ready to publish from <code>${esc(info.hostname)}</code>. This adds a feed to the chosen account's profile that anyone can find.</p>
+    <div class="row">
+      <input id="fgName" maxlength="24" value="My keywords" aria-label="Feed name">
+      <select id="fgAs">${state.accounts.map((a) => `<option value="${a.slot}" ${a.slot === state.actAs ? 'selected' : ''}>@${esc(a.handle)}</option>`).join('')}</select>
+      <button class="primary" id="fgPublish">Publish feed</button>
+    </div>
+    <input id="fgDesc" maxlength="300" placeholder="Description (optional)" style="width:100%;margin-top:8px" aria-label="Feed description">`
+  $('#fgPublish').onclick = async () => {
+    const slot = Number($('#fgAs').value)
+    if (!confirm(`Publish "${$('#fgName').value}" as a public custom feed on ${acctName(slot)}?`)) return
+    try {
+      await api('/api/feedgen/publish', { slot, displayName: $('#fgName').value, description: $('#fgDesc').value })
+      toast('Feed published')
+      renderFeedgen()
+    } catch (err) { toast(err.message) }
+  }
+}
+$('#feedgenBox').addEventListener('toggle', (e) => e.target.open && renderFeedgen())
+
+// ---------- trending ----------
+
+const tr = {
+  hours: Number(safeGet('trHours')) || 24,
+  who: 'all',
+  topic: null, // the topic being drilled into
+  data: null,
+  expanded: new Set(), // sections showing all items instead of the top 5
+}
+const TOP_N = 5
+
+function hoursLabel(h) {
+  return h === 72 ? '3 days' : `${h} hours`
+}
+
+// Text to highlight in drill-down posts. Links and mentions have nothing visible to mark.
+function topicTerms(t) {
+  if (t.kind === 'word' || t.kind === 'phrase') return [t.label]
+  if (t.kind === 'tag') return [t.label]
+  return []
+}
+
+const KIND_ICON = { tag: '#', word: 'Aa', phrase: 'Aa', link: '🔗', mention: '@' }
+
+function renderTrendControls() {
+  document.querySelectorAll('#trHours button').forEach((b) => b.classList.toggle('on', b.dataset.value === String(tr.hours)))
+  const who = $('#trWho')
+  who.hidden = state.accounts.length < 2
+  const opts = [['all', 'Everyone']]
+  for (const a of state.accounts) opts.push([String(a.slot), `${LETTERS[a.slot]} follows`])
+  if (state.accounts.length === 2) opts.push(['both', 'Both'])
+  who.innerHTML = opts.map(([v, l]) => `<button data-value="${v}" class="${tr.who === v ? 'on' : ''}">${esc(l)}</button>`).join('')
+}
+
+async function loadTrending() {
+  renderTrendControls()
+  renderTrendHead()
+  if (tr.topic) return // drilling in: the feed shows the posts
+  $('#trList').innerHTML = '<div class="feed-end">Finding topics…</div>'
+  try {
+    tr.data = await api(`/api/trending?hours=${tr.hours}&who=${tr.who}${state.englishOnly ? '&lang=en' : ''}`)
+    renderTrending()
+  } catch (err) {
+    $('#trList').innerHTML = `<div class="feed-end">Couldn't load trends: ${esc(err.message)}</div>`
+  }
+}
+
+function renderTopic(t, list, i) {
+  let rise
+  if (t.isNew) rise = '<span class="rise new" title="Not seen in the week before">new</span>'
+  else if (t.ratio >= 1.5) rise = `<span class="rise" title="About ${t.usual} people in a usual ${hoursLabel(tr.hours)}">↑ ${t.ratio}×</span>`
+  else rise = `<span class="rise flat" title="About ${t.usual} people in a usual ${hoursLabel(tr.hours)}">usual</span>`
+  const summary = t.summary
+    ? `<span class="summary">${t.source === 'article' ? '<span class="src" title="Headline of an article people linked">Headline</span> ' : ''}${esc(t.summary)}</span>`
+    : ''
+  const related = t.related?.length ? `<span class="related">Also: ${t.related.map(esc).join(', ')}</span>` : ''
+  return `<button class="topic" data-list="${list}" data-i="${i}">
+    <span class="kind" title="${esc(t.kind)}">${KIND_ICON[t.kind] ?? '•'}</span>
+    <span class="t"><b>${esc(t.label)}</b>${summary}${related}
+      <small>${t.people} people · ${t.posts} posts · previous ${hoursLabel(tr.hours)}: ${t.prevPeople}</small></span>
+    ${rise}</button>`
+}
+
+// The first sentence (or linked article's title) of a shared post, as its summary
+function postSummary(post) {
+  const ext = post.embed?.external ?? post.embed?.media?.external
+  const text = (post.record?.text ?? '').replace(/https?:\/\/\S+/g, '').replace(/\s+/g, ' ').trim()
+  const first = text.split(/(?<=[.!?])\s/)[0] ?? ''
+  const pick = first.length >= 20 ? first : text || ext?.title || 'Post with media'
+  return pick.length > 170 ? pick.slice(0, 170).replace(/\s+\S*$/, '') + '…' : pick
+}
+
+function renderShared(s, i) {
+  const a = s.post.author
+  const names = s.sharers.slice(0, 4).map((h) => `@${esc(h)}`).join(', ') + (s.sharers.length > 4 ? ` +${s.sharers.length - 4}` : '')
+  return `<button class="topic" data-list="shared" data-i="${i}">
+    <img class="kind avatar-mini" src="${esc(a.avatar ?? '')}" alt="">
+    <span class="t"><b>${esc(a.displayName || a.handle)}</b><span class="summary">${esc(postSummary(s.post))}</span>
+      <small>Shared by ${names}</small></span>
+    <span class="rise">${s.sharers.length}×</span></button>`
+}
+
+const SECTIONS = [
+  { key: 'rising', title: 'Rising', hint: 'More people than usual are talking about these', empty: 'Nothing is rising faster than usual right now.' },
+  { key: 'popular', title: 'Most talked about', hint: 'The most people are talking about these', empty: 'Not enough posts in this window.' },
+  { key: 'shared', title: 'Most shared', hint: 'Posts that several people you follow reposted or quoted', empty: 'Nothing was shared by 2 or more people you follow.' },
+]
+
+function renderTrending() {
+  const d = tr.data
+  if (!d) return
+  const history = d.historyDays < 7 ? ` Only ${d.historyDays} days of history are stored so far, so "usual" is based on that.` : ''
+  $('#trNote').textContent = `From ${d.windowPosts.toLocaleString()} posts by people you follow in the last ${hoursLabel(d.hours)}, compared with their usual rate over the week before.${history}`
+
+  $('#trList').innerHTML = SECTIONS.map(({ key, title, hint, empty }) => {
+    const list = d[key] ?? []
+    const all = tr.expanded.has(key)
+    const shown = all ? list : list.slice(0, TOP_N)
+    const items = shown.map((x, i) => (key === 'shared' ? renderShared(x, i) : renderTopic(x, key, i))).join('')
+    const more = list.length > TOP_N
+      ? `<button class="link-btn" data-more="${key}">${all ? 'Show top 5' : `Show all ${list.length}`}</button>`
+      : ''
+    return `<section class="trend-section">
+      <div class="trend-section-head"><h3>${title}</h3><small>${hint}</small></div>
+      ${items || `<div class="feed-end">${empty}</div>`}
+      ${more}</section>`
+  }).join('')
+}
+
+function renderTrendHead() {
+  const head = $('#trHead')
+  head.hidden = !tr.topic
+  $('#trList').hidden = !!tr.topic
+  $('#trNote').hidden = !!tr.topic
+  if (!tr.topic) return
+  const t = tr.topic
+  const link = t.url ? ` <a href="${esc(t.url)}" target="_blank" rel="noopener">open link ↗</a>` : ''
+  head.innerHTML = `<button class="secondary" id="trBack">← Topics</button>
+    <h2>${esc(t.label)}</h2><small>${t.people} people · ${t.posts} posts in the last ${hoursLabel(tr.hours)}${link}</small>
+    ${t.summary ? `<p class="trend-head-summary">${esc(t.summary)}</p>` : ''}`
+  $('#trBack').onclick = () => {
+    tr.topic = null
+    showView('trending')
+  }
+}
+
+$('#trList').addEventListener('click', (e) => {
+  const more = e.target.closest('[data-more]')
+  if (more) {
+    const key = more.dataset.more
+    tr.expanded.has(key) ? tr.expanded.delete(key) : tr.expanded.add(key)
+    return renderTrending()
+  }
+  const b = e.target.closest('.topic')
+  if (!b) return
+  if (b.dataset.list === 'shared') return showThread(tr.data.shared[Number(b.dataset.i)].post.uri)
+  tr.topic = tr.data[b.dataset.list][Number(b.dataset.i)]
+  showView('trending')
+  window.scrollTo({ top: 0 })
+})
+
+for (const [id, key] of [['#trHours', 'hours'], ['#trWho', 'who']]) {
+  $(id).addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-value]')
+    if (!b) return
+    tr[key] = key === 'hours' ? Number(b.dataset.value) : b.dataset.value
+    if (key === 'hours') safeSet('trHours', tr.hours)
+    tr.topic = null
+    showView('trending')
+  })
+}
+
+// ---------- discover ----------
+
+const dv = { kw: 0, mode: 'all', data: null, shown: 30 }
+
+async function loadDiscover() {
+  // Keywords list feeds the keyword switcher
+  if (!state.kw.list.length) {
+    try {
+      const k = await api('/api/keywords')
+      state.kw.list = k.keywords
+    } catch {}
+  }
+  // Paused keywords still have their recent history, so they're useful for finding people too
+  const kws = state.kw.list
+  if (dv.kw && !kws.some((k) => k.id === dv.kw)) dv.kw = 0
+  $('#dvKeyword').innerHTML = [['0', 'All keywords', true], ...kws.map((k) => [String(k.id), k.query, k.enabled])]
+    .map(([v, l, on]) => `<button data-value="${v}" class="${String(dv.kw) === v ? 'on' : ''} ${on ? '' : 'paused'}" title="${on ? '' : 'Paused keyword (still has recent history)'}">${esc(l)}</button>`).join('')
+  document.querySelectorAll('#dvMode button').forEach((b) => b.classList.toggle('on', b.dataset.value === dv.mode))
+  $('#dvList').innerHTML = '<div class="feed-end">Ranking…</div>'
+  try {
+    dv.data = await api(`/api/discover?mode=${dv.mode}${dv.kw ? `&kw=${dv.kw}` : ''}`)
+    renderDiscover()
+  } catch (err) {
+    $('#dvList').innerHTML = `<div class="feed-end">Couldn't rank accounts: ${esc(err.message)}</div>`
+  }
+}
+
+function kwName(id) {
+  return state.kw.list.find((k) => k.id === id)?.query ?? ''
+}
+
+function followButtons(did) {
+  return state.accounts.map((a) => `<button class="pc-btn follow" data-dv="follow" data-slot="${a.slot}" data-did="${esc(did)}">${badge(a.slot)} Follow</button>`).join('')
+}
+
+function renderDiscover() {
+  const d = dv.data
+  const thin = d.historyDays < 7 ? ` Your keyword history covers ${d.historyDays} days so far, so "regularly" will get more reliable over the next week.` : ''
+  const refreshed = d.refreshing ? 'Refreshing network signals now…' : d.lastRefreshMs ? `Network signals updated ${ago(new Date(d.lastRefreshMs).toISOString())} ago.` : 'Network signals not read yet; they fill in a minute after startup.'
+  $('#dvNote').textContent = `People you don't follow, ranked by how regularly they post about your keywords over the last ${d.days} days (after your context rules), how much of what they post is on-topic, and whether people you follow and your ${d.experts} topic experts reshare or follow them. ${refreshed}${thin}`
+  $('#dvRefresh').disabled = d.refreshing
+
+  $('#dvAuditions').innerHTML = d.auditions.length
+    ? `<section class="trend-section"><div class="trend-section-head"><h3>Auditioning</h3><small>Their posts are collected without following them. Follow or drop when you've seen enough.</small></div>
+      ${d.auditions.map((a) => `<div class="dv-row" data-did="${esc(a.did)}">
+        <button class="avatar-btn" data-profile="${esc(a.did)}"><img class="avatar" src="${esc(a.avatar ?? '')}" alt=""></button>
+        <div class="dv-main">
+          <div><b data-profile="${esc(a.did)}">${esc(a.displayName || a.handle)}</b> <span class="dim">@${esc(a.handle)}</span></div>
+          <div class="dv-why">Since ${new Date(a.startedAt).toLocaleDateString()}: ${a.postsSince} posts, ${a.onTopicSince} on your topics · ${a.posts14d} posts in the last 14 days</div>
+          <div class="dv-actions">
+            <button class="pc-btn" data-dv="posts" data-did="${esc(a.did)}" data-handle="${esc(a.handle)}">Their posts</button>
+            ${a.followed ? '<span class="dim">Following</span>' : followButtons(a.did)}
+            <button class="pc-btn" data-dv="unaudition" data-did="${esc(a.did)}">${a.followed ? 'Done' : 'Drop'}</button>
+          </div></div></div>`).join('')}</section>`
+    : ''
+
+  const list = d.candidates.slice(0, dv.shown)
+  $('#dvList').innerHTML = list.length
+    ? `<section class="trend-section"><div class="trend-section-head"><h3>Suggested</h3><small>${d.candidates.length} people</small></div>
+      ${list.map((c) => {
+        const why = [
+          `On topic on <b>${c.days}</b> of the last ${d.days} days`,
+          `${c.onTopic} post${c.onTopic === 1 ? '' : 's'}${c.replies ? ` (${c.replies} replies)` : ''}`,
+          c.focus !== null ? `${c.focusCapped ? '≤' : ''}${Math.round(c.focus * 100)}% of what they post` : null,
+          c.resharedBy ? `reshared by ${c.resharedBy} you follow` : null,
+          c.experts ? `followed by ${c.experts} of your experts` : null,
+        ].filter(Boolean).join(' · ')
+        return `<div class="dv-row" data-did="${esc(c.did)}">
+          <button class="avatar-btn" data-profile="${esc(c.did)}"><img class="avatar" loading="lazy" src="${esc(c.avatar ?? '')}" alt=""></button>
+          <div class="dv-main">
+            <div><b data-profile="${esc(c.did)}">${esc(c.displayName || c.handle)}</b> <span class="dim">@${esc(c.handle)}</span>
+              ${c.keywords.slice(0, 3).map((id) => `<span class="kw-tag">${esc(kwName(id))}</span>`).join(' ')}
+              ${c.highVolume ? '<span class="kw-tag hidden-tag" title="Dozens of on-topic posts a day; often a bot or news feed">high volume</span>' : ''}
+              ${c.automated ? '<span class="kw-tag hidden-tag" title="Its name or handle says it is a bot or feed">automated</span>' : ''}</div>
+            <div class="dv-why">${why}</div>
+            <div class="dv-actions">
+              <button class="pc-btn" data-dv="posts" data-did="${esc(c.did)}" data-handle="${esc(c.handle)}">Their posts</button>
+              <button class="pc-btn" data-dv="audition" data-did="${esc(c.did)}" data-handle="${esc(c.handle)}" title="Collect their posts for a while without following">Audition</button>
+              ${followButtons(c.did)}
+              <button class="link-btn" data-dv="dismiss" data-did="${esc(c.did)}" data-handle="${esc(c.handle)}">Not interested</button>
+            </div></div>
+          <span class="dv-score" title="Ranking score">${c.score}</span></div>`
+      }).join('')}</section>`
+    : `<div class="feed-end">No one yet. People need on-topic posts on at least 2 different days to show up here.</div>`
+  $('#dvMore').innerHTML = d.candidates.length > dv.shown ? `<button class="link-btn" id="dvShowMore">Show more</button>` : ''
+  $('#dvShowMore')?.addEventListener('click', () => { dv.shown += 30; renderDiscover() })
+}
+
+$('#dvKeyword').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-value]')
+  if (!b) return
+  dv.kw = Number(b.dataset.value)
+  dv.shown = 30
+  loadDiscover()
+})
+$('#dvMode').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-value]')
+  if (!b) return
+  dv.mode = b.dataset.value
+  dv.shown = 30
+  loadDiscover()
+})
+$('#dvRefresh').addEventListener('click', async () => {
+  await api('/api/discover/refresh', {})
+  toast('Refreshing network signals; this takes a minute or two')
+  loadDiscover()
+})
+
+$('#discoverView').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-dv]')
+  if (!b) return
+  const did = b.dataset.did
+  const handle = b.dataset.handle
+  const removeRow = () => b.closest('.dv-row')?.remove()
+  b.disabled = true
+  try {
+    switch (b.dataset.dv) {
+      case 'posts':
+        return showAuthor(did, handle ?? did)
+      case 'follow': {
+        const slot = Number(b.dataset.slot)
+        const res = await api('/api/follows/follow', { dids: [did], slots: [slot] })
+        if (res.failed?.length) throw new Error(res.failed[0].error)
+        toast(`Followed from ${acctName(slot)}`, {
+          label: 'Undo',
+          run: async () => {
+            await api('/api/follows/unfollow', { dids: [did], slots: [slot] })
+            loadDiscover()
+          },
+        })
+        return loadDiscover()
+      }
+      case 'audition':
+        await api('/api/discover/audition', { did, start: true })
+        toast(`Auditioning @${handle}: their posts will be collected without following`)
+        return loadDiscover()
+      case 'unaudition':
+        await api('/api/discover/audition', { did, start: false })
+        return loadDiscover()
+      case 'dismiss':
+        await api('/api/discover/dismiss', { did })
+        removeRow()
+        toast(`Won't suggest @${handle} again`, {
+          label: 'Undo',
+          run: async () => {
+            await api('/api/discover/dismiss', { did, undo: true })
+            loadDiscover()
+          },
+        })
+        return
+    }
+  } catch (err) {
+    toast(err.message)
+  } finally {
+    b.disabled = false
+  }
+})
+
+// ---------- follows ----------
+
+const DAY = 86_400_000
+const fv = {
+  rows: [],
+  days: 14,
+  overlap: 'all',
+  search: '',
+  quick: new Set(),
+  lowN: 3,
+  sort: { key: 'lastActiveMs', dir: 1 }, // quietest first
+  selected: new Set(),
+  shown: 150,
+}
+
+function daysAgo(ms) {
+  if (!ms) return null
+  return Math.floor((Date.now() - ms) / DAY)
+}
+
+async function loadFollows() {
+  try {
+    const data = await api('/api/follows')
+    fv.rows = data.rows
+    fv.days = data.days
+    const known = new Set(fv.rows.map((r) => r.did))
+    for (const did of fv.selected) if (!known.has(did)) fv.selected.delete(did)
+    renderFollowsNote(data)
+    renderOverlap()
+    renderFollows()
+  } catch (err) {
+    $('#fvNote').textContent = `Couldn't load follows: ${err.message}`
+  }
+}
+
+function renderFollowsNote(data) {
+  const parts = []
+  if (data.history.running && data.history.deep) {
+    parts.push(`<b>Reading ${data.days} days of history: ${data.history.done} of ${data.history.total} accounts.</b> Post counts will keep rising until this finishes.`)
+  }
+  const notes = Object.entries(data.notifications ?? {})
+    .map(([slot, n]) => n.error ? `${LETTERS[slot]}: couldn't read notifications` : n.oldestMs ? `${LETTERS[slot]} back to ${new Date(n.oldestMs).toLocaleDateString()}` : null)
+    .filter(Boolean)
+  if (notes.length) parts.push(`"Interacted" comes from your notifications (${notes.join(', ')}).`)
+  else parts.push('"Interacted" fills in once your notifications have been read.')
+  $('#fvNote').innerHTML = parts.join(' ')
+}
+
+function renderOverlap() {
+  const n = (f) => fv.rows.filter(f).length
+  const opts = [['all', `All ${fv.rows.length}`]]
+  if (state.accounts.length === 2) {
+    const [a, b] = state.accounts.map((x) => x.slot)
+    opts.push(['both', `Both ${n((r) => r.followedBy.length === 2)}`])
+    opts.push([`only${a}`, `${LETTERS[a]} only ${n((r) => r.followedBy.length === 1 && r.followedBy[0] === a)}`])
+    opts.push([`only${b}`, `${LETTERS[b]} only ${n((r) => r.followedBy.length === 1 && r.followedBy[0] === b)}`])
+  }
+  $('#fvOverlap').innerHTML = opts.map(([v, l]) => `<button data-value="${v}" class="${fv.overlap === v ? 'on' : ''}">${esc(l)}</button>`).join('')
+}
+
+function filteredFollows() {
+  const q = fv.search.toLowerCase()
+  const quietMs = Date.now() - fv.days * DAY
+  return fv.rows.filter((r) => {
+    if (fv.overlap === 'both' && r.followedBy.length !== 2) return false
+    if (fv.overlap.startsWith('only') && !(r.followedBy.length === 1 && r.followedBy[0] === Number(fv.overlap.slice(4)))) return false
+    if (q && !`${r.handle ?? ''} ${r.displayName ?? ''}`.toLowerCase().includes(q)) return false
+    if (fv.quick.has('quiet') && r.lastActiveMs > quietMs) return false
+    if (fv.quick.has('low') && r.posts + r.replies > fv.lowN) return false
+    // "Doesn't follow back" means not back to any account of yours that follows them
+    if (fv.quick.has('noback') && r.followedBy.some((s) => r.followsBack.includes(s))) return false
+    if (fv.quick.has('never') && r.interactions > 0) return false
+    if (fv.quick.has('reposty') && !(r.repostShare >= 0.8 && r.posts + r.replies + r.reposts >= 5)) return false
+    if (fv.quick.has('muted') && !r.muted.length) return false
+    return true
+  })
+}
+
+function sortValue(r, key) {
+  switch (key) {
+    case 'name': return (r.displayName || r.handle || '').toLowerCase()
+    case 'followedBy': return r.followedBy.join('')
+    case 'followsBack': return r.followsBack.length
+    case 'repostShare': return r.repostShare ?? -1
+    default: return r[key] ?? -1
+  }
+}
+
+function renderFollows() {
+  const rows = filteredFollows()
+  const { key, dir } = fv.sort
+  rows.sort((a, b) => {
+    const x = sortValue(a, key)
+    const y = sortValue(b, key)
+    return (x < y ? -1 : x > y ? 1 : 0) * dir
+  })
+  fv.visible = rows
+  document.querySelectorAll('.fv-table th[data-sort]').forEach((th) => {
+    th.classList.toggle('sorted', th.dataset.sort === key)
+    th.textContent = th.textContent.replace(/ [▲▼]$/, '') + (th.dataset.sort === key ? (dir === 1 ? ' ▲' : ' ▼') : '')
+  })
+
+  const quietMs = Date.now() - fv.days * DAY
+  $('#fvBody').innerHTML = rows.slice(0, fv.shown).map((r) => {
+    const d = daysAgo(r.lastActiveMs)
+    const last = d === null ? `<span class="dim" title="No posts seen">—</span>` : d === 0 ? 'today' : `${d}d`
+    const share = r.repostShare === null ? '<span class="dim">—</span>' : `${Math.round(r.repostShare * 100)}%`
+    const back = r.followedBy.map((s) => r.followsBack.includes(s) ? badge(s, `Follows ${acctName(s)}`) : `<span class="dim" title="Doesn't follow ${esc(acctName(s))}">${LETTERS[s]}✕</span>`).join(' ')
+    const inter = r.interactions
+      ? `<span title="${Object.entries(r.interactionsBySlot).map(([s, n]) => `${n} with ${acctName(s)}`).join(', ')}; last ${new Date(r.lastInteractionMs).toLocaleDateString()}">${r.interactions.toLocaleString()}</span>`
+      : '<span class="dim">0</span>'
+    return `<tr data-did="${esc(r.did)}" class="${fv.selected.has(r.did) ? 'sel' : ''}">
+      <td><input type="checkbox" data-pick ${fv.selected.has(r.did) ? 'checked' : ''} aria-label="Select ${esc(r.handle)}"></td>
+      <td><div class="who-cell"><img loading="lazy" src="${esc(r.avatar ?? '')}" alt="">
+        <div><b>${esc(r.displayName || r.handle || r.did)}</b><small>@${esc(r.handle ?? '')}${r.muted.length ? ' · muted' : ''}</small></div></div></td>
+      <td>${r.followedBy.map((s) => badge(s)).join(' ')}</td>
+      <td class="num">${r.posts}</td>
+      <td class="num">${r.replies}</td>
+      <td class="num">${r.reposts}</td>
+      <td class="num">${share}</td>
+      <td class="num ${r.lastActiveMs && r.lastActiveMs < quietMs ? 'dim' : ''}">${last}</td>
+      <td>${back}</td>
+      <td class="num">${inter}</td>
+      <td class="num">${r.followersCount?.toLocaleString() ?? '<span class="dim">—</span>'}</td>
+      <td><div class="row-acts">
+        <button data-row="posts" title="See their posts from the last ${fv.days} days">Posts</button>
+        <a class="row-acts-link" href="https://bsky.app/profile/${esc(r.handle || r.did)}" target="_blank" rel="noopener" title="Open profile on bsky.app">↗</a>
+        <button data-row="unfollow" class="bad" title="Unfollow">Unfollow</button>
+      </div></td></tr>`
+  }).join('')
+
+  $('#fvMore').innerHTML = rows.length > fv.shown
+    ? `Showing ${fv.shown} of ${rows.length}. <button class="link-btn" id="fvShowMore">Show more</button>`
+    : rows.length ? `${rows.length} account${rows.length === 1 ? '' : 's'}` : 'No accounts match these filters.'
+  $('#fvShowMore')?.addEventListener('click', () => { fv.shown += 300; renderFollows() })
+
+  const shownDids = rows.slice(0, fv.shown).map((r) => r.did)
+  $('#fvAll').checked = shownDids.length > 0 && shownDids.every((d) => fv.selected.has(d))
+  renderBulk()
+}
+
+function renderBulk() {
+  $('#fvBulk').hidden = fv.selected.size === 0
+  $('#fvCount').textContent = `${fv.selected.size} selected`
+}
+
+$('#fvOverlap').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-value]')
+  if (!b) return
+  fv.overlap = b.dataset.value
+  fv.shown = 150
+  renderOverlap()
+  renderFollows()
+})
+$('#fvSearch').addEventListener('input', (e) => { fv.search = e.target.value.trim(); fv.shown = 150; renderFollows() })
+$('#fvQuick').addEventListener('change', (e) => {
+  if (e.target.id === 'fvLowN') {
+    fv.lowN = Math.max(0, Number(e.target.value) || 0)
+    if (!fv.quick.has('low')) return
+  } else if (e.target.dataset.q) {
+    e.target.checked ? fv.quick.add(e.target.dataset.q) : fv.quick.delete(e.target.dataset.q)
+  }
+  fv.shown = 150
+  renderFollows()
+})
+$('#fvLowN').addEventListener('click', (e) => e.preventDefault()) // typing in it shouldn't toggle the chip
+$('#fvLowN').addEventListener('focus', (e) => e.target.select())
+
+document.querySelector('.fv-table thead').addEventListener('click', (e) => {
+  const th = e.target.closest('th[data-sort]')
+  if (!th) return
+  const key = th.dataset.sort
+  // Numbers sort high-to-low first, except "last active" where oldest (quietest) first is most useful
+  const firstDir = ['name', 'lastActiveMs'].includes(key) ? 1 : -1
+  fv.sort = fv.sort.key === key ? { key, dir: -fv.sort.dir } : { key, dir: firstDir }
+  renderFollows()
+})
+
+$('#fvAll').addEventListener('change', (e) => {
+  for (const r of fv.visible.slice(0, fv.shown)) e.target.checked ? fv.selected.add(r.did) : fv.selected.delete(r.did)
+  renderFollows()
+})
+
+$('#fvBody').addEventListener('click', (e) => {
+  const tr = e.target.closest('tr[data-did]')
+  if (!tr) return
+  const did = tr.dataset.did
+  const row = fv.rows.find((r) => r.did === did)
+  if (e.target.matches('[data-pick]')) {
+    e.target.checked ? fv.selected.add(did) : fv.selected.delete(did)
+    tr.classList.toggle('sel', e.target.checked)
+    renderBulk()
+    return
+  }
+  const act = e.target.closest('[data-row]')?.dataset.row
+  if (act === 'posts') showAuthor(did, row.handle)
+  if (act === 'unfollow') openAction('unfollow', [did])
+})
+
+$('#fvBulk').addEventListener('click', (e) => {
+  const act = e.target.closest('[data-bulk]')?.dataset.bulk
+  if (!act) return
+  if (act === 'clear') {
+    fv.selected.clear()
+    return renderFollows()
+  }
+  openAction(act, [...fv.selected])
+})
+
+// ---------- follow actions (confirm dialog) ----------
+
+function rowsFor(dids) {
+  return dids.map((d) => fv.rows.find((r) => r.did === d)).filter(Boolean)
+}
+
+function nameList(rows) {
+  const names = rows.slice(0, 8).map((r) => `<li>${esc(r.displayName || r.handle)} <span class="dim">@${esc(r.handle ?? '')}</span></li>`).join('')
+  return `<ul class="ad-list">${names}${rows.length > 8 ? `<li>…and ${rows.length - 8} more</li>` : ''}</ul>`
+}
+
+// Checkboxes for which of your accounts to act from; `count(slot)` = how many selected accounts it affects
+function acctChoices(count, checkedIf) {
+  return `<div class="ad-accts">${state.accounts.map((a) => {
+    const n = count(a.slot)
+    return `<label><input type="checkbox" name="slot" value="${a.slot}" ${n && checkedIf(a.slot) ? 'checked' : ''} ${n ? '' : 'disabled'}>
+      ${badge(a.slot)} @${esc(a.handle)} <span class="dim">(${n})</span></label>`
+  }).join('')}</div>`
+}
+
+function chosenSlots() {
+  return [...document.querySelectorAll('#adBody input[name=slot]:checked')].map((i) => Number(i.value))
+}
+
+function openAction(kind, dids) {
+  const rows = rowsFor(dids)
+  if (!rows.length) return
+  const dlg = $('#actionDialog')
+  const body = $('#adBody')
+  const n = rows.length
+  const label = `${n} account${n === 1 ? '' : 's'}`
+  const follows = (slot) => rows.filter((r) => r.followedBy.includes(slot)).length
+
+  if (kind === 'unfollow') {
+    $('#adTitle').textContent = `Unfollow ${label}`
+    body.innerHTML = `${nameList(rows)}<p>Unfollow from:</p>${acctChoices(follows, () => true)}
+      <div class="ad-foot"><button class="secondary" data-close>Cancel</button><button class="danger-btn" id="adGo">Unfollow</button></div>`
+  } else if (kind === 'mute') {
+    const unmuted = (slot) => rows.filter((r) => !r.muted.includes(slot)).length
+    $('#adTitle').textContent = `Mute ${label}`
+    body.innerHTML = `${nameList(rows)}<p>Muting hides their posts in Bluesky without unfollowing. They aren't told. Mute from:</p>
+      ${acctChoices(unmuted, (s) => s === state.actAs)}
+      <div class="ad-foot"><button class="secondary" data-close>Cancel</button><button class="primary" id="adGo">Mute</button></div>`
+  } else if (kind === 'follow') {
+    const notYet = (slot) => rows.filter((r) => !r.followedBy.includes(slot)).length
+    $('#adTitle').textContent = `Follow ${label}`
+    body.innerHTML = `${nameList(rows)}<p>Follow from:</p>${acctChoices(notYet, () => true)}
+      <div class="ad-foot"><button class="secondary" data-close>Cancel</button><button class="primary" id="adGo">Follow</button></div>`
+  } else if (kind === 'list') {
+    const first = state.accounts.find((a) => follows(a.slot))?.slot ?? state.accounts[0]?.slot
+    $('#adTitle').textContent = `Move ${label} to a list`
+    body.innerHTML = `${nameList(rows)}
+      <p>Add them to a list so you can check on them now and then.</p>
+      <div class="ad-row"><label>Account <select id="adListAcct">${state.accounts.map((a) => `<option value="${a.slot}" ${a.slot === first ? 'selected' : ''}>${LETTERS[a.slot]} · @${esc(a.handle)}</option>`).join('')}</select></label></div>
+      <div class="ad-row"><label>List <select id="adList"><option>Loading…</option></select></label>
+        <input type="text" id="adNewList" placeholder="New list name" value="Check later" maxlength="64" hidden></div>
+      <label class="ad-row"><input type="checkbox" id="adAlsoUnfollow" checked> Also unfollow them from this account</label>
+      <div class="ad-foot"><button class="secondary" data-close>Cancel</button><button class="primary" id="adGo">Move</button></div>`
+    const loadLists = async () => {
+      const sel = $('#adList')
+      sel.innerHTML = '<option>Loading…</option>'
+      try {
+        const lists = await api(`/api/lists?slot=${$('#adListAcct').value}`)
+        sel.innerHTML = lists.map((l) => `<option value="${esc(l.uri)}">${esc(l.name)} (${l.count})</option>`).join('') + '<option value="__new">+ New list…</option>'
+      } catch (err) {
+        sel.innerHTML = '<option value="__new">+ New list…</option>'
+        toast(err.message)
+      }
+      sel.dispatchEvent(new Event('change'))
+    }
+    $('#adListAcct').onchange = loadLists
+    $('#adList').onchange = () => ($('#adNewList').hidden = $('#adList').value !== '__new')
+    loadLists()
+  }
+
+  $('#adGo').onclick = async (e) => {
+    const go = e.target
+    go.disabled = true
+    try {
+      await runAction(kind, rows)
+      dlg.close()
+    } catch (err) {
+      toast(err.message)
+    } finally {
+      go.disabled = false
+    }
+  }
+  dlg.showModal()
+}
+
+function summarize(verb, res) {
+  const failed = res.failed?.length ? ` (${res.failed.length} failed: ${res.failed[0].error})` : ''
+  return `${verb} ${res.done}${failed}`
+}
+
+async function runAction(kind, rows) {
+  const dids = rows.map((r) => r.did)
+  if (kind === 'unfollow') {
+    const slots = chosenSlots()
+    if (!slots.length) throw new Error('Choose an account')
+    // Remember exactly which follows we remove so Undo can restore them
+    const removed = slots.map((s) => [s, rows.filter((r) => r.followedBy.includes(s)).map((r) => r.did)])
+    const res = await api('/api/follows/unfollow', { dids, slots })
+    const failedPairs = new Set((res.failed ?? []).map((f) => `${f.slot}|${f.did}`))
+    fv.selected.clear()
+    await loadFollows()
+    toast(summarize('Unfollowed', res), {
+      label: 'Undo',
+      run: async () => {
+        let n = 0
+        for (const [slot, list] of removed) {
+          const back = list.filter((d) => !failedPairs.has(`${slot}|${d}`))
+          if (back.length) n += (await api('/api/follows/follow', { dids: back, slots: [slot] })).done
+        }
+        toast(`Followed ${n} again`)
+        loadFollows()
+      },
+    })
+  } else if (kind === 'mute') {
+    const slots = chosenSlots()
+    if (!slots.length) throw new Error('Choose an account')
+    const res = await api('/api/follows/mute', { dids, slots })
+    await loadFollows()
+    toast(summarize('Muted', res), {
+      label: 'Undo',
+      run: async () => {
+        await api('/api/follows/unmute', { dids, slots })
+        toast('Unmuted')
+        loadFollows()
+      },
+    })
+  } else if (kind === 'follow') {
+    const slots = chosenSlots()
+    if (!slots.length) throw new Error('Choose an account')
+    const res = await api('/api/follows/follow', { dids, slots })
+    await loadFollows()
+    toast(summarize('Followed', res))
+  } else if (kind === 'list') {
+    const slot = Number($('#adListAcct').value)
+    let listUri = $('#adList').value
+    if (listUri === '__new' || !listUri) {
+      const name = $('#adNewList').value.trim()
+      if (!name) throw new Error('Give the new list a name')
+      listUri = (await api('/api/lists/create', { slot, name })).uri
+    }
+    const added = await api('/api/lists/add', { slot, listUri, dids })
+    let msg = `Added ${added.done} to the list`
+    if ($('#adAlsoUnfollow').checked) {
+      const res = await api('/api/follows/unfollow', { dids, slots: [slot] })
+      msg += ` and unfollowed ${res.done}`
+    }
+    fv.selected.clear()
+    await loadFollows()
+    toast(msg)
+  }
+}
+
+// ---------- actions ----------
+
+async function refreshPost(uri) {
+  const fresh = await api(`/api/post?uri=${encodeURIComponent(uri)}`)
+  if (!fresh.post) return null
+  state.posts.set(uri, fresh)
+  document.querySelectorAll(`.actions[data-uri="${CSS.escape(uri)}"]`).forEach((el) => {
+    el.outerHTML = renderActions(fresh.post, fresh.viewer)
+  })
+  return fresh
+}
+
+// Like or repost as the selected account, warning if the other account already did
+async function toggle(uri, kind) {
+  const fresh = await refreshPost(uri)
+  if (!fresh) return toast('That post is no longer available')
+  const { post, viewer } = fresh
+  const slot = state.actAs
+  const existing = viewer[slot]?.[kind]
+  const verb = kind === 'like' ? 'liked' : 'reposted'
+
+  if (existing) {
+    await api(`/api/un${kind}`, { slot, uri, [`${kind}Uri`]: existing })
+    toast(`Removed ${kind} from ${acctName(slot)}`)
+  } else {
+    const others = whoDid(viewer, kind).filter((s) => s !== slot)
+    if (others.length && !confirm(`Already ${verb} by ${others.map(acctName).join(' and ')}.\n\n${kind === 'like' ? 'Like' : 'Repost'} it from ${acctName(slot)} too?`)) return
+    await api(`/api/${kind}`, { slot, uri, cid: post.cid })
+    toast(`${kind === 'like' ? 'Liked' : 'Reposted'} as ${acctName(slot)}`)
+  }
+  await refreshPost(uri)
+}
+
+document.addEventListener('click', async (e) => {
+  const blurred = e.target.closest('img.blurred')
+  if (blurred) {
+    e.preventDefault()
+    blurred.classList.remove('blurred')
+    return
+  }
+  const openThread = e.target.closest('[data-open-thread]')
+  if (openThread && !e.target.closest('a')) return showThread(openThread.dataset.openThread)
+
+  const btn = e.target.closest('.act')
+  if (!btn) return
+  const uri = btn.closest('.actions').dataset.uri
+  const known = state.posts.get(uri)
+  btn.disabled = true
+  try {
+    switch (btn.dataset.act) {
+      case 'like': await toggle(uri, 'like'); break
+      case 'repost': await toggle(uri, 'repost'); break
+      case 'reply': openCompose({ replyTo: known?.post }); break
+      case 'quote': openCompose({ quote: known?.post }); break
+      case 'thread': await showThread(uri); break
+    }
+  } catch (err) {
+    toast(err.message)
+  } finally {
+    btn.disabled = false
+  }
+})
+
+// ---------- thread ----------
+
+function renderThreadNode(node, focusUri, depth = 0) {
+  if (!node) return ''
+  if (node.$type === 'app.bsky.feed.defs#notFoundPost') return '<div class="thread-item missing">Deleted post</div>'
+  if (node.$type === 'app.bsky.feed.defs#blockedPost') return '<div class="thread-item missing">Post from a blocked account</div>'
+  if (!node.post) return ''
+  const p = node.post
+  // Only the first signed-in account's like/repost state is known here until you act on it
+  const primary = state.accounts[0]?.slot
+  const viewer = primary ? { [primary]: { like: p.viewer?.like, repost: p.viewer?.repost } } : {}
+  state.posts.set(p.uri, { post: p, viewer })
+  const replies = (node.replies ?? [])
+    .filter((r) => r.post)
+    .map((r) => renderThreadNode(r, focusUri, depth + 1))
+    .join('')
+  return `<div class="thread-item ${p.uri === focusUri ? 'focus' : ''}">${renderPost(p)}${renderActions(p, viewer)}</div>
+    ${replies ? `<div class="thread-replies">${replies}</div>` : ''}`
+}
+
+async function showThread(uri) {
+  const dlg = $('#threadDialog')
+  const body = $('#threadBody')
+  body.innerHTML = '<div class="missing">Loading thread…</div>'
+  if (!dlg.open) dlg.showModal()
+  try {
+    const thread = await api(`/api/thread?uri=${encodeURIComponent(uri)}`)
+    const parents = []
+    for (let n = thread.parent; n; n = n.parent) parents.unshift(n)
+    body.innerHTML = parents.map((p) => renderThreadNode({ ...p, replies: [] }, uri)).join('') + renderThreadNode(thread, uri)
+    body.querySelector('.focus')?.scrollIntoView({ block: 'center' })
+  } catch (err) {
+    body.innerHTML = `<div class="error">Couldn't load thread: ${esc(err.message)}</div>`
+  }
+}
+
+// ---------- compose ----------
+
+let composeTarget = {}
+
+function openCompose({ replyTo, quote } = {}) {
+  composeTarget = { replyTo: replyTo?.uri, quote: quote?.uri }
+  $('#composeTitle').textContent = replyTo ? 'Reply' : quote ? 'Quote post' : 'New post'
+  const ctx = replyTo || quote
+  $('#composeContext').innerHTML = ctx ? `<div class="card">${renderPost(ctx, { small: true })}</div>` : ''
+  $('#composeAs').innerHTML = state.accounts
+    .map((a) => `<option value="${a.slot}" ${a.slot === state.actAs ? 'selected' : ''}>${LETTERS[a.slot]} · @${esc(a.handle)}</option>`)
+    .join('')
+  $('#composeText').value = ''
+  $('#composeError').textContent = ''
+  composeImages.length = 0
+  clearVideo()
+  renderComposeImages()
+  updateCount()
+  $('#composeDialog').showModal()
+  $('#composeText').focus()
+}
+
+// Approximate grapheme count; the server does the exact check
+const segmenter = 'Segmenter' in Intl ? new Intl.Segmenter() : null
+function updateCount() {
+  const text = $('#composeText').value
+  const n = segmenter ? [...segmenter.segment(text)].length : text.length
+  const el = $('#composeCount')
+  el.textContent = 300 - n
+  el.classList.toggle('over', n > 300)
+}
+$('#composeText').addEventListener('input', updateCount)
+$('#composeText').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) $('#composeForm').requestSubmit()
+})
+$('#composeBtn').addEventListener('click', () => openCompose())
+
+$('#composeForm').addEventListener('submit', async (e) => {
+  e.preventDefault()
+  const send = $('#composeSend')
+  send.disabled = true
+  $('#composeError').textContent = ''
+  const slot = Number($('#composeAs').value)
+  try {
+    if (composeImages.some((img) => img.processing)) throw new Error('Still preparing images; try again in a moment')
+    if (composeVideo && composeVideo.state !== 'ready') {
+      throw new Error(composeVideo.state === 'error' ? 'The video failed; remove it or try another' : 'The video is still uploading or processing')
+    }
+    if (composeVideo && !composeVideo.alt.trim() && !confirm("The video has no alt text. People using screen readers won't know what it shows.\n\nPost anyway?")) return
+    const missingAlt = composeImages.filter((img) => !img.alt.trim()).length
+    if (missingAlt && !confirm(`${missingAlt === 1 ? '1 image has' : `${missingAlt} images have`} no alt text. People using screen readers won't know what ${missingAlt === 1 ? 'it shows' : 'they show'}.\n\nPost anyway?`)) return
+    send.textContent = composeImages.length ? 'Uploading…' : 'Posting…'
+    const images = composeImages.map(({ data, mime, alt, width, height }) => ({ data, mime, alt, width, height }))
+    const video = composeVideo
+      ? { blob: composeVideo.blob, alt: composeVideo.alt, width: composeVideo.width, height: composeVideo.height }
+      : undefined
+    await api('/api/compose', { slot, text: $('#composeText').value, images, video, ...composeTarget })
+    $('#composeDialog').close()
+    toast(`Posted as ${acctName(slot)}`)
+    if (composeTarget.replyTo) refreshPost(composeTarget.replyTo).catch(() => {})
+  } catch (err) {
+    $('#composeError').textContent = err.message
+  } finally {
+    send.disabled = false
+    send.textContent = 'Post'
+  }
+})
+
+// ---------- images in the compose box ----------
+
+const MAX_IMAGES = 4
+const MAX_IMAGE_BYTES = 1_900_000 // Bluesky allows 2 MB; leave a little room
+const MAX_SIDE = 2000 // Bluesky shows images at most this size anyway
+const composeImages = [] // { id, url, data (base64), mime, width, height, alt, processing, note }
+
+// Every image is redrawn before upload. That shrinks big photos to fit Bluesky's limit and
+// removes hidden metadata such as the GPS location your phone stores in photos.
+async function prepareImage(file) {
+  let bitmap
+  try {
+    bitmap = await createImageBitmap(file) // applies the photo's rotation
+  } catch {
+    throw new Error(`${file.name}: this browser can't read that image type`)
+  }
+  const scale = Math.min(1, MAX_SIDE / Math.max(bitmap.width, bitmap.height))
+  const width = Math.round(bitmap.width * scale)
+  const height = Math.round(bitmap.height * scale)
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, width, height)
+  bitmap.close?.()
+
+  const toBlob = (type, quality) => new Promise((resolve) => canvas.toBlob(resolve, type, quality))
+  let blob = null
+  let note = ''
+  // Keep PNGs as PNG (screenshots, transparency) when they fit; everything else becomes JPEG
+  if (file.type === 'image/png') blob = await toBlob('image/png')
+  if (!blob || blob.size > MAX_IMAGE_BYTES) {
+    for (const q of [0.92, 0.85, 0.75, 0.65, 0.5]) {
+      blob = await toBlob('image/jpeg', q)
+      if (blob && blob.size <= MAX_IMAGE_BYTES) break
+    }
+  }
+  if (!blob || blob.size > MAX_IMAGE_BYTES) throw new Error(`${file.name}: couldn't shrink it under 2 MB`)
+  if (file.type === 'image/gif') note = 'GIFs are posted as a still image'
+  const data = await new Promise((resolve) => {
+    const r = new FileReader()
+    r.onload = () => resolve(String(r.result).split(',')[1])
+    r.readAsDataURL(blob)
+  })
+  return { data, mime: blob.type, width, height, url: URL.createObjectURL(blob), note }
+}
+
+let imageSeq = 0
+async function addImages(files) {
+  const video = [...files].find((f) => f.type.startsWith('video/'))
+  if (video) return addVideo(video)
+  const list = [...files].filter((f) => f.type.startsWith('image/') || /\.(heic|heif)$/i.test(f.name))
+  if (!list.length) return
+  if (composeVideo) return toast('A post can have images or a video, not both')
+  const room = MAX_IMAGES - composeImages.length
+  if (room <= 0) return toast(`Bluesky allows ${MAX_IMAGES} images per post`)
+  if (list.length > room) toast(`Only the first ${room} added; Bluesky allows ${MAX_IMAGES} images per post`)
+  await Promise.all(list.slice(0, room).map(async (file) => {
+    const item = { id: ++imageSeq, alt: '', processing: true, name: file.name }
+    composeImages.push(item)
+    renderComposeImages()
+    try {
+      Object.assign(item, await prepareImage(file), { processing: false })
+    } catch (err) {
+      composeImages.splice(composeImages.indexOf(item), 1)
+      toast(err.message)
+    }
+    renderComposeImages()
+  }))
+}
+
+function renderComposeImages() {
+  const el = $('#composeImages')
+  el.hidden = composeImages.length === 0
+  el.innerHTML = composeImages.map((img, i) => `<div class="cimg" data-img="${img.id}">
+      <div class="cimg-thumb">${img.processing ? '<span class="dim">Preparing…</span>' : `<img src="${img.url}" alt="">`}
+        <button type="button" class="cimg-remove" data-remove="${img.id}" aria-label="Remove image ${i + 1}">✕</button></div>
+      <textarea class="cimg-alt" data-alt="${img.id}" rows="3" maxlength="2000"
+        placeholder="Alt text: describe the image for people who can't see it">${esc(img.alt)}</textarea>
+      ${img.note ? `<small class="dim">${esc(img.note)}</small>` : ''}
+    </div>`).join('')
+  $('.add-images').classList.toggle('disabled', composeImages.length >= MAX_IMAGES || !!composeVideo)
+  $('.add-video').classList.toggle('disabled', composeImages.length > 0 || !!composeVideo)
+  updateCount()
+}
+
+// ---------- video in the compose box ----------
+
+const MAX_VIDEO_BYTES = 100_000_000
+const MAX_VIDEO_SECONDS = 180
+// { file, url, state: checking|uploading|processing|ready|error, progress, xhr, jobId, blob, alt, width, height, duration, error, slot }
+let composeVideo = null
+let videoPoll = 0
+
+function clearVideo() {
+  if (composeVideo) {
+    composeVideo.xhr?.abort()
+    if (composeVideo.url) URL.revokeObjectURL(composeVideo.url)
+  }
+  clearTimeout(videoPoll)
+  composeVideo = null
+  $('#composeAs').disabled = false
+  renderComposeVideo()
+}
+
+function readVideoInfo(url) {
+  return new Promise((resolve, reject) => {
+    const v = document.createElement('video')
+    v.preload = 'metadata'
+    v.onloadedmetadata = () => resolve({ width: v.videoWidth, height: v.videoHeight, duration: v.duration })
+    v.onerror = () => reject(new Error("This browser can't read that video"))
+    v.src = url
+  })
+}
+
+async function addVideo(file) {
+  if (composeImages.length) return toast('A post can have images or a video, not both')
+  if (composeVideo) return toast('One video per post')
+  if (file.size > MAX_VIDEO_BYTES) return toast(`${file.name} is ${(file.size / 1e6).toFixed(0)} MB; videos can be at most 100 MB`)
+  const slot = Number($('#composeAs').value)
+  const v = (composeVideo = { file, url: URL.createObjectURL(file), state: 'checking', progress: 0, alt: '', slot })
+  // The uploaded file belongs to this account, so the account can't change while a video is attached
+  $('#composeAs').disabled = true
+  renderComposeVideo()
+  const fail = (message) => {
+    if (composeVideo !== v) return
+    v.state = 'error'
+    v.error = message
+    renderComposeVideo()
+  }
+  try {
+    Object.assign(v, await readVideoInfo(v.url))
+    if (v.duration > MAX_VIDEO_SECONDS + 0.5) return fail(`This video is ${Math.round(v.duration)} seconds; Bluesky allows up to 3 minutes`)
+    const limits = await api(`/api/video/limits?slot=${slot}`)
+    if (!limits.canUpload) return fail(limits.message || "Bluesky isn't allowing video uploads for this account right now. Video needs a verified email address.")
+    if (limits.remainingDailyBytes !== null && file.size > limits.remainingDailyBytes) return fail("This video is bigger than what's left of today's upload allowance")
+  } catch (err) {
+    return fail(err.message)
+  }
+  if (composeVideo !== v) return
+
+  // Upload with progress, then wait for Bluesky to process it
+  v.state = 'uploading'
+  renderComposeVideo()
+  const xhr = (v.xhr = new XMLHttpRequest())
+  xhr.open('POST', `/api/video/upload?slot=${slot}&name=${encodeURIComponent(file.name)}`)
+  xhr.setRequestHeader('content-type', file.type || 'video/mp4')
+  xhr.upload.onprogress = (e) => {
+    if (e.lengthComputable && composeVideo === v) {
+      v.progress = Math.round((e.loaded / e.total) * 100)
+      renderVideoStatus()
+    }
+  }
+  xhr.onerror = () => fail('Upload failed; check your connection')
+  xhr.onload = () => {
+    let data = {}
+    try { data = JSON.parse(xhr.responseText) } catch {}
+    if (xhr.status !== 200) return fail(data.error || `Upload failed (${xhr.status})`)
+    v.jobId = data.jobId
+    v.state = 'processing'
+    v.progress = 0
+    renderComposeVideo()
+    if (data.blob) return ready(data.blob)
+    pollVideo(v)
+  }
+  xhr.send(file)
+
+  function ready(blob) {
+    if (composeVideo !== v) return
+    v.blob = blob
+    v.state = 'ready'
+    renderComposeVideo()
+  }
+  async function pollVideo() {
+    if (composeVideo !== v) return
+    try {
+      const st = await api(`/api/video/status?jobId=${encodeURIComponent(v.jobId)}`)
+      if (st.state === 'JOB_STATE_COMPLETED' && st.blob) return ready(st.blob)
+      if (st.state === 'JOB_STATE_FAILED') return fail(st.message || st.error || "Bluesky couldn't process this video")
+      v.progress = st.progress ?? v.progress
+      renderVideoStatus()
+    } catch (err) {
+      // A brief hiccup while polling isn't fatal; keep trying
+    }
+    videoPoll = setTimeout(pollVideo, 1500)
+  }
+}
+
+function videoStatusText(v) {
+  switch (v.state) {
+    case 'checking': return 'Checking video…'
+    case 'uploading': return `Uploading… ${v.progress}%`
+    case 'processing': return `Processing on Bluesky… ${v.progress ? `${v.progress}%` : ''}`
+    case 'ready': {
+      const size = v.file.size >= 1e6 ? `${(v.file.size / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(v.file.size / 1e3))} KB`
+      return `Ready · ${Math.round(v.duration)}s · ${size}`
+    }
+    case 'error': return v.error
+  }
+}
+
+function renderVideoStatus() {
+  const v = composeVideo
+  const el = $('#composeVideo .cvid-status')
+  if (!v || !el) return
+  el.textContent = videoStatusText(v)
+  el.classList.toggle('error', v.state === 'error')
+  const bar = $('#composeVideo .cvid-bar span')
+  if (bar) bar.style.width = `${v.state === 'ready' ? 100 : v.progress}%`
+}
+
+function renderComposeVideo() {
+  const el = $('#composeVideo')
+  const v = composeVideo
+  el.hidden = !v
+  if (!v) {
+    el.innerHTML = ''
+  } else {
+    el.innerHTML = `<div class="cvid-preview"><video src="${v.url}" controls muted playsinline preload="metadata"></video>
+        <button type="button" class="cimg-remove" id="cvidRemove" aria-label="Remove video">✕</button></div>
+      <div class="cvid-side">
+        <div class="cvid-status"></div>
+        ${v.state === 'error' ? '' : '<div class="cvid-bar"><span></span></div>'}
+        <textarea class="cimg-alt" id="cvidAlt" rows="3" maxlength="1000"
+          placeholder="Alt text: describe the video for people who can't see it">${esc(v.alt)}</textarea>
+      </div>`
+    $('#cvidRemove').onclick = () => {
+      clearVideo()
+      renderComposeImages()
+    }
+    $('#cvidAlt').oninput = (e) => (v.alt = e.target.value)
+    renderVideoStatus()
+  }
+  const send = $('#composeSend')
+  if (send) send.disabled = !!v && v.state !== 'ready' && v.state !== 'error'
+  renderComposeImagesButtons()
+}
+
+function renderComposeImagesButtons() {
+  $('.add-images').classList.toggle('disabled', composeImages.length >= MAX_IMAGES || !!composeVideo)
+  $('.add-video').classList.toggle('disabled', composeImages.length > 0 || !!composeVideo)
+}
+
+$('#composeVideoFile').addEventListener('change', (e) => {
+  if (e.target.files[0]) addVideo(e.target.files[0])
+  e.target.value = ''
+})
+// Closing the compose box cancels an upload in progress
+$('#composeDialog').addEventListener('close', () => clearVideo())
+
+$('#composeImages').addEventListener('input', (e) => {
+  const id = Number(e.target.dataset.alt)
+  const img = composeImages.find((x) => x.id === id)
+  if (img) img.alt = e.target.value
+})
+$('#composeImages').addEventListener('click', (e) => {
+  const id = Number(e.target.closest('[data-remove]')?.dataset.remove)
+  if (!id) return
+  const i = composeImages.findIndex((x) => x.id === id)
+  if (i >= 0) {
+    if (composeImages[i].url) URL.revokeObjectURL(composeImages[i].url)
+    composeImages.splice(i, 1)
+  }
+  renderComposeImages()
+})
+$('#composeFiles').addEventListener('change', (e) => {
+  addImages(e.target.files)
+  e.target.value = '' // so choosing the same file again still works
+})
+// Paste a screenshot or copied image straight into the text box
+$('#composeText').addEventListener('paste', (e) => {
+  const files = [...(e.clipboardData?.files ?? [])]
+  if (files.length) {
+    e.preventDefault()
+    addImages(files)
+  }
+})
+// Drag and drop images anywhere on the compose box
+const composeBox = $('#composeForm')
+composeBox.addEventListener('dragover', (e) => {
+  if ([...(e.dataTransfer?.types ?? [])].includes('Files')) {
+    e.preventDefault()
+    composeBox.classList.add('dropping')
+  }
+})
+composeBox.addEventListener('dragleave', (e) => {
+  if (!composeBox.contains(e.relatedTarget)) composeBox.classList.remove('dropping')
+})
+composeBox.addEventListener('drop', (e) => {
+  composeBox.classList.remove('dropping')
+  if (e.dataTransfer?.files?.length) {
+    e.preventDefault()
+    addImages(e.dataTransfer.files)
+  }
+})
+
+document.querySelectorAll('dialog').forEach((d) => {
+  d.addEventListener('click', (e) => {
+    if (e.target === d || e.target.closest('[data-close]')) d.close()
+  })
+})
+
+// ---------- profile card ----------
+
+const pc = {
+  cache: new Map(), // did -> { at, data }
+  did: null, // profile currently shown
+  anchor: null, // element it's attached to
+  showTimer: 0,
+  hideTimer: 0,
+}
+const PC_CACHE_MS = 5 * 60_000
+
+async function fetchProfile(did, fresh = false) {
+  const hit = pc.cache.get(did)
+  if (!fresh && hit && Date.now() - hit.at < PC_CACHE_MS) return hit.data
+  const data = await api(`/api/profile?actor=${encodeURIComponent(did)}`)
+  pc.cache.set(did, { at: Date.now(), data })
+  return data
+}
+
+function linkify(text) {
+  return esc(text ?? '').replace(/(https?:\/\/[^\s<]+[^\s<.,:;"')\]])/g, '<a href="$1" target="_blank" rel="noopener">$1</a>')
+}
+
+function fmtCount(n) {
+  if (n == null) return '—'
+  return n >= 10_000 ? `${(n / 1000).toFixed(n >= 100_000 ? 0 : 1)}k` : n.toLocaleString()
+}
+
+function renderProfileCard(p) {
+  const rel = p.relationship
+  const slots = state.accounts.map((a) => a.slot)
+  const isSelf = slots.some((s) => rel[s]?.self)
+  const followsYou = slots.filter((s) => rel[s]?.followedBy)
+  const following = slots.filter((s) => rel[s]?.following)
+  const st = p.stats
+  const lastDays = st.lastActiveMs ? Math.floor((Date.now() - st.lastActiveMs) / 86_400_000) : null
+  const last = lastDays === null ? 'no recent activity seen' : lastDays === 0 ? 'active today' : `last active ${lastDays}d ago`
+
+  const buttons = isSelf ? '' : slots.map((s) => {
+    const r = rel[s] ?? {}
+    if (r.blocking || r.blockedBy) return `<span class="dim">${LETTERS[s]}: blocked</span>`
+    return r.following
+      ? `<button class="pc-btn unfollow" data-pc="unfollow" data-slot="${s}" title="Unfollow from ${esc(acctName(s))}">${badge(s)} Unfollow</button>`
+      : `<button class="pc-btn follow" data-pc="follow" data-slot="${s}" title="Follow from ${esc(acctName(s))}">${badge(s)} Follow</button>`
+  }).join('')
+  const actSlot = state.actAs
+  const muted = rel[actSlot]?.muted
+  const muteBtn = isSelf ? '' : `<button class="pc-btn" data-pc="${muted ? 'unmute' : 'mute'}" data-slot="${actSlot}" title="${muted ? 'Unmute' : 'Mute'} as ${esc(acctName(actSlot))}">${muted ? 'Unmute' : 'Mute'}</button>`
+
+  return `<div class="pc-head">
+      <img class="pc-avatar" src="${esc(p.avatar ?? '')}" alt="">
+      <div class="pc-names">
+        <b>${esc(p.displayName || p.handle)}</b>
+        <span class="dim">@${esc(p.handle)}</span>
+        <div class="pc-tags">
+          ${isSelf ? '<span class="pc-tag">This is you</span>' : ''}
+          ${followsYou.map((s) => `<span class="pc-tag">Follows ${badge(s)}</span>`).join('')}
+          ${following.length ? `<span class="pc-tag">You follow from ${following.map((s) => badge(s)).join('')}</span>` : ''}
+          ${muted ? '<span class="pc-tag">Muted</span>' : ''}
+        </div>
+      </div>
+    </div>
+    ${p.description ? `<div class="pc-bio">${linkify(p.description)}</div>` : ''}
+    <div class="pc-counts"><span><b>${fmtCount(p.followersCount)}</b> followers</span><span><b>${fmtCount(p.followsCount)}</b> following</span><span><b>${fmtCount(p.postsCount)}</b> posts</span></div>
+    <div class="pc-stats">Last ${st.days} days: ${st.posts} posts · ${st.replies} replies · ${st.reposts} reposts · ${last}${st.interactions ? ` · interacted with you ${st.interactions}×` : ''}</div>
+    <div class="pc-actions">
+      ${buttons}${muteBtn}
+      ${following.length ? '<button class="pc-btn" data-pc="posts">Their posts</button>' : ''}
+      <a class="pc-btn" href="https://bsky.app/profile/${esc(p.handle || p.did)}" target="_blank" rel="noopener">Open in Bluesky ↗</a>
+    </div>`
+}
+
+function placeCard(card, anchor) {
+  if (innerWidth < 560) {
+    card.classList.add('sheet-mode') // bottom sheet on phones
+    card.style.left = card.style.top = ''
+    return
+  }
+  card.classList.remove('sheet-mode')
+  const r = anchor.getBoundingClientRect()
+  const w = card.offsetWidth
+  const h = card.offsetHeight
+  let left = Math.min(Math.max(8, r.left), innerWidth - w - 8)
+  let top = r.bottom + 6
+  if (top + h > innerHeight - 8) top = Math.max(8, r.top - h - 6) // flip above when there's no room below
+  card.style.left = `${left}px`
+  card.style.top = `${top}px`
+}
+
+async function openProfileCard(did, anchor) {
+  const card = $('#profileCard')
+  clearTimeout(pc.hideTimer)
+  // An open dialog (e.g. a thread) is drawn above everything else, so the card has to live inside it
+  const host = document.querySelector('dialog[open]') ?? document.body
+  if (card.parentElement !== host) host.append(card)
+  pc.did = did
+  pc.anchor = anchor
+  card.innerHTML = '<div class="dim pc-loading">Loading…</div>'
+  card.hidden = false
+  placeCard(card, anchor)
+  try {
+    const p = await fetchProfile(did)
+    if (pc.did !== did) return
+    card.innerHTML = renderProfileCard(p)
+    placeCard(card, anchor)
+  } catch (err) {
+    if (pc.did === did) card.innerHTML = `<div class="error">${esc(err.message)}</div>`
+  }
+}
+
+function closeProfileCard() {
+  clearTimeout(pc.showTimer)
+  clearTimeout(pc.hideTimer)
+  $('#profileCard').hidden = true
+  pc.did = null
+}
+
+// Hover with a short delay so the card doesn't flash while moving the mouse across the feed
+const canHover = matchMedia('(hover: hover)').matches
+document.addEventListener('mouseover', (e) => {
+  if (!canHover) return
+  const t = e.target.closest('[data-profile]')
+  if (t) {
+    clearTimeout(pc.hideTimer)
+    if (pc.did === t.dataset.profile && !$('#profileCard').hidden) return
+    clearTimeout(pc.showTimer)
+    pc.showTimer = setTimeout(() => openProfileCard(t.dataset.profile, t), 450)
+  } else if (e.target.closest('#profileCard')) {
+    clearTimeout(pc.hideTimer)
+  }
+})
+document.addEventListener('mouseout', (e) => {
+  if (!canHover) return
+  const from = e.target.closest('[data-profile], #profileCard')
+  const to = e.relatedTarget?.closest?.('[data-profile], #profileCard')
+  if (!from || to) return
+  clearTimeout(pc.showTimer)
+  // Moving between the name and the card is allowed; leaving both closes it
+  pc.hideTimer = setTimeout(() => {
+    if (!$('#profileCard').matches(':hover')) closeProfileCard()
+  }, 300)
+})
+// Click/tap opens it straight away (touch screens have no hover)
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('[data-profile]')
+  if (t) {
+    e.preventDefault()
+    clearTimeout(pc.showTimer)
+    openProfileCard(t.dataset.profile, t)
+    return
+  }
+  if (!$('#profileCard').hidden && !e.target.closest('#profileCard')) closeProfileCard()
+}, true)
+document.querySelectorAll('dialog').forEach((d) => d.addEventListener('close', () => {
+  closeProfileCard()
+  document.body.append($('#profileCard'))
+}))
+document.addEventListener('keydown', (e) => e.key === 'Escape' && closeProfileCard())
+addEventListener('scroll', () => !$('#profileCard').classList.contains('sheet-mode') && closeProfileCard(), { passive: true })
+
+// Dims cards from an author no longer followed by any account, in the Following feed
+function markUnfollowed(did, followingNow) {
+  if (state.view !== 'following') return
+  document.querySelectorAll(`#feed .card`).forEach((card) => {
+    if (card.querySelector(`:scope > .post [data-profile="${CSS.escape(did)}"]`)) card.classList.toggle('unfollowed', !followingNow)
+  })
+}
+
+$('#profileCard').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-pc]')
+  if (!b || !pc.did) return
+  const did = pc.did
+  const p = pc.cache.get(did)?.data
+  const slot = Number(b.dataset.slot)
+  const who = `@${p?.handle ?? did}`
+  b.disabled = true
+  try {
+    switch (b.dataset.pc) {
+      case 'unfollow': {
+        if (!confirm(`Unfollow ${who} from ${acctName(slot)}?`)) return
+        const res = await api('/api/follows/unfollow', { dids: [did], slots: [slot] })
+        if (res.failed?.length) throw new Error(res.failed[0].error)
+        toast(`Unfollowed ${who} from ${acctName(slot)}`, {
+          label: 'Undo',
+          run: async () => {
+            await api('/api/follows/follow', { dids: [did], slots: [slot] })
+            toast(`Following ${who} again`)
+            const again = await fetchProfile(did, true)
+            markUnfollowed(did, true)
+            if (pc.did === did) $('#profileCard').innerHTML = renderProfileCard(again)
+          },
+        })
+        break
+      }
+      case 'follow': {
+        const res = await api('/api/follows/follow', { dids: [did], slots: [slot] })
+        if (res.failed?.length) throw new Error(res.failed[0].error)
+        toast(`Followed ${who} from ${acctName(slot)}`)
+        break
+      }
+      case 'mute':
+      case 'unmute': {
+        const muting = b.dataset.pc === 'mute'
+        if (muting && !confirm(`Mute ${who} as ${acctName(slot)}? Their posts are hidden in Bluesky; they aren't told.`)) return
+        await api(`/api/follows/${b.dataset.pc}`, { dids: [did], slots: [slot] })
+        toast(`${muting ? 'Muted' : 'Unmuted'} ${who} as ${acctName(slot)}`)
+        break
+      }
+      case 'posts':
+        closeProfileCard()
+        return showAuthor(did, p?.handle ?? did)
+    }
+    const fresh = await fetchProfile(did, true)
+    markUnfollowed(did, Object.values(fresh.relationship).some((r) => r.following))
+    if (pc.did === did) {
+      $('#profileCard').innerHTML = renderProfileCard(fresh)
+      placeCard($('#profileCard'), pc.anchor)
+    }
+  } catch (err) {
+    toast(err.message)
+  } finally {
+    b.disabled = false
+  }
+})
+
+// ---------- language filter ----------
+
+// One setting for every feed; there's a checkbox in the feed filters and one in the Trending controls
+function syncEnglishBoxes() {
+  document.querySelectorAll('.english-only').forEach((box) => (box.checked = state.englishOnly))
+}
+document.querySelectorAll('.english-only').forEach((box) =>
+  box.addEventListener('change', () => {
+    state.englishOnly = box.checked
+    safeSet('englishOnly', state.englishOnly ? '1' : '0')
+    syncEnglishBoxes()
+    if (state.view === 'trending') {
+      tr.topic = null
+      showView('trending')
+    } else loadFeed(true)
+  }),
+)
+syncEnglishBoxes()
+
+// ---------- theme ----------
+
+// Cycles Auto (follow the system) → Light → Dark
+const THEMES = { auto: ['◐', 'Theme: automatic (follows your system). Click for light'], light: ['☀', 'Theme: light. Click for dark'], dark: ['☾', 'Theme: dark. Click for automatic'] }
+function applyTheme(t) {
+  if (t === 'auto') delete document.documentElement.dataset.theme
+  else document.documentElement.dataset.theme = t
+  const [icon, label] = THEMES[t]
+  $('#themeBtn').textContent = icon
+  $('#themeBtn').title = label
+  $('#themeBtn').setAttribute('aria-label', label)
+}
+let theme = ['light', 'dark'].includes(safeGet('theme')) ? safeGet('theme') : 'auto'
+applyTheme(theme)
+$('#themeBtn').addEventListener('click', () => {
+  theme = { auto: 'light', light: 'dark', dark: 'auto' }[theme]
+  safeSet('theme', theme)
+  applyTheme(theme)
+})
+
+// ---------- header & status ----------
+
+function renderActAs() {
+  const el = $('#actAs')
+  if (!state.accounts.length) return (el.innerHTML = '')
+  el.innerHTML = '<span class="label">Act as</span>' + state.accounts
+    .map((a) => `<button role="radio" class="acct-${a.slot}" aria-checked="${a.slot === state.actAs}" data-slot="${a.slot}" title="@${esc(a.handle)}">${badge(a.slot)}<span class="h">@${esc(a.handle)}</span></button>`)
+    .join('')
+}
+$('#actAs').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-slot]')
+  if (!btn) return
+  state.actAs = Number(btn.dataset.slot)
+  safeSet('actAs', state.actAs)
+  renderActAs()
+  // Re-draw like/repost highlights for the newly selected account
+  document.querySelectorAll('.actions[data-uri]').forEach((el) => {
+    const known = state.posts.get(el.dataset.uri)
+    if (known) el.outerHTML = renderActions(known.post, known.viewer)
+  })
+})
+
+function renderWho(follows) {
+  const el = $('#whoFilter')
+  const two = state.accounts.length === 2
+  const opts = [['all', 'Everyone']]
+  for (const a of state.accounts) opts.push([String(a.slot), `${LETTERS[a.slot]} follows`])
+  if (two) opts.push(['both', `Both${follows ? ` (${follows.both})` : ''}`])
+  el.hidden = state.accounts.length < 2
+  el.innerHTML = opts.map(([v, label]) => `<button data-value="${v}" class="${state.who === v ? 'on' : ''}">${esc(label)}</button>`).join('')
+}
+
+function renderSetup(s) {
+  const el = $('#setup')
+  const failed = s.accounts.filter((a) => !a.ok)
+  if (s.configured > 0 && failed.length === 0) return (el.hidden = true)
+  el.hidden = false
+  el.innerHTML = s.configured === 0
+    ? `<h2>Add your accounts</h2>
+       <p>Copy <code>.env.example</code> to <code>.env</code>, add an <b>app password</b> for each account
+       (Bluesky → Settings → Privacy and Security → App Passwords), then restart with <code>npm start</code>.</p>`
+    : `<h2>Sign-in problem</h2>${failed.map((a) => `<p class="err">@${esc(a.handle)}: ${esc(a.error)}</p>`).join('')}
+       <p>Check the handle and app password in <code>.env</code>, then restart.</p>`
+}
+
+async function refreshStatus() {
+  try {
+    const s = await api('/api/status')
+    state.feedHours = s.feedHours
+    const c = s.collector
+    const b = s.backfill
+    let text = c.connected ? `Live · ${s.storedPosts.toLocaleString()} posts stored` : (c.error || 'Connecting…')
+    if (b.running) text += ` · catching up ${b.done}/${b.total}`
+    $('#status').innerHTML = `<span class="dot ${c.connected ? 'live' : 'down'}"></span>${esc(text)}`
+    return s
+  } catch {
+    $('#status').innerHTML = '<span class="dot down"></span>Dashboard server is not running'
+    return null
+  }
+}
+
+async function init() {
+  const s = await refreshStatus()
+  if (!s) return
+  state.accounts = s.accounts.filter((a) => a.ok)
+  if (!state.accounts.some((a) => a.slot === state.actAs)) state.actAs = state.accounts[0]?.slot ?? 1
+  renderSetup(s)
+  renderActAs()
+  renderWho(s.follows)
+  $('#filters').hidden = state.accounts.length === 0
+  document.querySelector('.tabs').hidden = state.accounts.length === 0
+  if (state.accounts.length) showView(state.view)
+
+  // While the first backfill runs, keep refreshing so posts appear as they arrive
+  let wasRunning = s.backfill.running
+  setInterval(async () => {
+    const st = await refreshStatus()
+    if (st && wasRunning && !st.backfill.running && state.view === 'following') loadFeed(true)
+    if (st) wasRunning = st.backfill.running
+    if (state.view === 'keywords') loadKeywords()
+    // Keep the stats fresh while history is still being read (not while a dialog is open)
+    if (state.view === 'follows' && st?.backfill.running && !$('#actionDialog').open) loadFollows()
+  }, 10_000)
+  setInterval(checkNew, 30_000)
+}
+
+init()
