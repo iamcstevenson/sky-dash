@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Runs Skydash in the background: starts at login, restarts if it stops. See the README for how to install it. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.skydash.dashboard</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE__</string>
+    <string>--env-file-if-exists=.env</string>
+    <string>--disable-warning=ExperimentalWarning</string>
+    <string>src/server.ts</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__SKYDASH_DIR__</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <!-- Wait at least 10 seconds between restarts if it keeps stopping -->
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/Skydash.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/Skydash.log</string>
+</dict>
+</plist>
