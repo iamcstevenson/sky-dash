@@ -63,6 +63,33 @@ Don't also run `npm start` while the service is running; both would try to use p
   their language label; for the roughly 10% with no label, Skydash looks at the text (non-Latin scripts, or more common
   Spanish/German/French/Portuguese/Italian/Dutch words than English ones). It errs toward keeping a post when unsure.
 
+### Sharing a post
+
+The share arrow on every post opens the same menu as bsky.app: **Copy link to post**, **Send via chat** (pick a recent
+chat or search for someone, add an optional message, and send it from the account you're acting as), and **Embed post**
+(wide screens only), which gives you Bluesky's embed code with a System, Light or Dark option. Posts whose authors hide
+them from logged-out viewers only offer Send via chat, with a note explaining why.
+
+Send via chat needs an app password created with "Allow access to your direct messages" turned on.
+
+### Profile cards everywhere
+
+Hovering over a name or avatar opens the profile card on every tab: posts, quoted posts, @mentions, notifications, the
+Follows table, Trending, Discover and the keyword rules.
+
+## Notifications tab
+
+Modeled on Bluesky's new notifications beta, using the same grouped notifications from Bluesky's servers:
+
+- **All, People I follow, Replies, Follows and Post alerts** tabs.
+- **Grouped rows:** "Alex and 24 others liked your post" expands to list everyone. Replies, quotes and mentions show the
+  post with its reply context and the usual like, reply, repost, quote and share buttons.
+- **Today and Earlier** sections, with unread notifications tinted. Follows is a list of people with Follow buttons.
+- **Unread counts** on the tab and on each account's button, and a **Load new notifications** button when more arrive.
+
+Notifications belong to one account at a time, so the tab follows whichever account you're acting as. As on Bluesky,
+opening **All** marks that account's notifications as seen on Bluesky itself; the other tabs don't.
+
 ## Keywords tab (phase 2)
 
 - Add keywords, #hashtags or "exact phrases". Each one is searched across all of Bluesky, and Skydash keeps matches from the last 48 hours. It checks for new matches every 2 minutes.

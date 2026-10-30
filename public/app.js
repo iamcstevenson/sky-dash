@@ -6,7 +6,7 @@ const LETTERS = { 1: 'A', 2: 'B' }
 const state = {
   accounts: [], // signed-in accounts: { slot, handle, did }
   actAs: Number(safeGet('actAs')) || 1,
-  view: ['keywords', 'follows', 'trending', 'discover'].includes(safeGet('view')) ? safeGet('view') : 'following',
+  view: ['keywords', 'follows', 'trending', 'discover', 'notifications'].includes(safeGet('view')) ? safeGet('view') : 'following',
   author: null, // { did, handle } when the Following tab shows one person's posts
   englishOnly: safeGet('englishOnly') !== '0', // on unless turned off
   kw: { list: [], selected: new Set(), hideFollowed: false, showHidden: false, hours: 48, polling: false },
@@ -31,9 +31,15 @@ async function api(path, body) {
   return data
 }
 
+// An open dialog is drawn above the rest of the page, so pop-ups have to live inside it to be seen
+function topLayerHost() {
+  return [...document.querySelectorAll('dialog[open]')].at(-1) ?? document.body
+}
+
 // action: optional { label, run } shown as a button (e.g. Undo); the toast then stays up longer
 function toast(msg, action) {
   const t = $('#toast')
+  if (t.parentElement !== topLayerHost()) topLayerHost().append(t)
   t.textContent = msg
   if (action) {
     const b = document.createElement('button')
@@ -94,7 +100,8 @@ function renderText(text, facets) {
     if (feat.$type === 'app.bsky.richtext.facet#link') href = feat.uri
     else if (feat.$type === 'app.bsky.richtext.facet#mention') href = `https://bsky.app/profile/${feat.did}`
     else if (feat.$type === 'app.bsky.richtext.facet#tag') href = `https://bsky.app/hashtag/${encodeURIComponent(feat.tag)}`
-    out += href && /^https?:/i.test(href) ? `<a href="${esc(href)}" target="_blank" rel="noopener">${inner}</a>` : inner
+    const profile = feat.$type === 'app.bsky.richtext.facet#mention' ? ` data-profile="${esc(feat.did)}"` : ''
+    out += href && /^https?:/i.test(href) ? `<a href="${esc(href)}"${profile} target="_blank" rel="noopener">${inner}</a>` : inner
     pos = byteEnd
   }
   return out + esc(dec.decode(bytes.slice(pos)))
@@ -138,9 +145,9 @@ function renderQuote(rec) {
   if (rec.$type === 'app.bsky.embed.record#viewRecord') {
     const media = (rec.embeds ?? []).map((e) => renderMedia(e, isSensitive(rec.labels), { uri: rec.uri, author: rec.author })).join('')
     return `<div class="quote" data-open-thread="${esc(rec.uri)}">
-      <div class="meta"><img class="avatar" style="width:18px;height:18px" src="${esc(rec.author.avatar ?? '')}" alt="">
-        <span class="name">${esc(rec.author.displayName || rec.author.handle)}</span>
-        <span class="handle">@${esc(rec.author.handle)}</span><span class="time">· ${ago(rec.indexedAt)}</span></div>
+      <div class="meta"><img class="avatar" data-profile="${esc(rec.author.did)}" style="width:18px;height:18px" src="${esc(rec.author.avatar ?? '')}" alt="">
+        <span class="name" data-profile="${esc(rec.author.did)}">${esc(rec.author.displayName || rec.author.handle)}</span>
+        <span class="handle" data-profile="${esc(rec.author.did)}">@${esc(rec.author.handle)}</span><span class="time">· ${ago(rec.indexedAt)}</span></div>
       <div class="text">${renderText(rec.value?.text, rec.value?.facets)}</div>${media}</div>`
   }
   if (rec.$type === 'app.bsky.embed.record#viewNotFound') return '<div class="quote missing">Quoted post was deleted</div>'
@@ -192,6 +199,7 @@ function renderActions(post, viewer) {
     <button class="act ${mine.repost ? 'reposted' : ''}" data-act="repost" title="Repost as ${esc(acctName(state.actAs))}">🔁 ${post.repostCount ?? 0}${dots(repostedBy)}</button>
     <button class="act" data-act="quote" title="Quote">❝ ${post.quoteCount ?? 0}</button>
     <button class="act ${mine.like ? 'liked' : ''}" data-act="like" title="Like as ${esc(acctName(state.actAs))}">${mine.like ? '♥' : '♡'} ${post.likeCount ?? 0}${dots(likedBy)}</button>
+    <button class="act" data-act="share" title="Share" aria-label="Share"><svg class="share-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 4.5 21 12l-8 7.5V15c-4.5 0-7.5 1.5-10 5 .5-5.500 3.500-10 10-10.500z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg></button>
     <button class="act right" data-act="thread" title="Show whole thread">Thread</button>
   </div>`
 }
@@ -372,23 +380,26 @@ function showView(name) {
   const isFollows = name === 'follows'
   const isTrending = name === 'trending'
   const isDiscover = name === 'discover'
+  const isNotifications = name === 'notifications'
+  $('#notifView').hidden = !isNotifications
   $('#discoverView').hidden = !isDiscover
   $('#kwPanel').hidden = !isKeywords
   $('#followsView').hidden = !isFollows
   $('#trendPanel').hidden = !isTrending
   document.body.classList.toggle('wide', isFollows)
   // Trending shows its own controls; its post list only appears once a topic is picked
-  $('#filters').hidden = isFollows || isTrending || isDiscover
-  const showFeed = !isFollows && !isDiscover && !(isTrending && !tr.topic)
+  $('#filters').hidden = isFollows || isTrending || isDiscover || isNotifications
+  const showFeed = !isFollows && !isDiscover && !isNotifications && !(isTrending && !tr.topic)
   $('#feed').hidden = !showFeed
   $('#feedEnd').hidden = !showFeed
-  if (isFollows || isTrending || isDiscover) $('#newBanner').hidden = true
+  if (isFollows || isTrending || isDiscover || isNotifications) $('#newBanner').hidden = true
   $('#hideFollowedWrap').hidden = !isKeywords
   $('#showHiddenWrap').hidden = !isKeywords
   $('#whoFilter').hidden = isKeywords || !!state.author || state.accounts.length < 2
   renderAuthorChip()
   if (isFollows) return loadFollows()
   if (isDiscover) return loadDiscover()
+  if (isNotifications) return loadNotifications(true)
   if (isTrending) {
     loadTrending()
     if (tr.topic) loadFeed(true)
@@ -577,11 +588,11 @@ async function openRules(k) {
     return
   }
   const people = (list, verdict) => list.length
-    ? list.map((p) => `<span class="person">@${esc(p.handle)} <button class="link-btn" data-rule-person="${esc(p.did)}" data-verdict="${verdict}" title="Remove">✕</button></span>`).join('')
+    ? list.map((p) => `<span class="person"><span data-profile="${esc(p.did)}">@${esc(p.handle)}</span> <button class="link-btn" data-rule-person="${esc(p.did)}" data-verdict="${verdict}" title="Remove">✕</button></span>`).join('')
     : '<span class="dim">None yet</span>'
   const suggested = r.suggested.length
     ? `<div class="rules-block"><b>Suggested “always show” accounts</b><small>Their recent posts keep passing your rules</small>
-        <div class="people">${r.suggested.map((p) => `<span class="person">@${esc(p.handle)} <span class="dim">(${p.kept})</span>
+        <div class="people">${r.suggested.map((p) => `<span class="person"><span data-profile="${esc(p.did)}">@${esc(p.handle)}</span> <span class="dim">(${p.kept})</span>
           <button class="link-btn" data-rule-trust="${esc(p.did)}">Always show</button></span>`).join('')}</div></div>`
     : ''
   body.innerHTML = `
@@ -730,7 +741,7 @@ function renderTopic(t, list, i) {
   const related = t.related?.length ? `<span class="related">Also: ${t.related.map(esc).join(', ')}</span>` : ''
   return `<button class="topic" data-list="${list}" data-i="${i}">
     <span class="kind" title="${esc(t.kind)}">${KIND_ICON[t.kind] ?? '•'}</span>
-    <span class="t"><b>${esc(t.label)}</b>${summary}${related}
+    <span class="t"><b ${t.kind === 'mention' ? `data-profile="${esc(t.term.slice(1))}"` : ''}>${esc(t.label)}</b>${summary}${related}
       <small>${t.people} people · ${t.posts} posts · previous ${hoursLabel(tr.hours)}: ${t.prevPeople}</small></span>
     ${rise}</button>`
 }
@@ -746,10 +757,10 @@ function postSummary(post) {
 
 function renderShared(s, i) {
   const a = s.post.author
-  const names = s.sharers.slice(0, 4).map((h) => `@${esc(h)}`).join(', ') + (s.sharers.length > 4 ? ` +${s.sharers.length - 4}` : '')
+  const names = s.sharers.slice(0, 4).map((x) => `<span data-profile="${esc(x.did)}">@${esc(x.handle)}</span>`).join(', ') + (s.sharers.length > 4 ? ` +${s.sharers.length - 4}` : '')
   return `<button class="topic" data-list="shared" data-i="${i}">
-    <img class="kind avatar-mini" src="${esc(a.avatar ?? '')}" alt="">
-    <span class="t"><b>${esc(a.displayName || a.handle)}</b><span class="summary">${esc(postSummary(s.post))}</span>
+    <img class="kind avatar-mini" data-profile="${esc(a.did)}" src="${esc(a.avatar ?? '')}" alt="">
+    <span class="t"><b data-profile="${esc(a.did)}">${esc(a.displayName || a.handle)}</b><span class="summary">${esc(postSummary(s.post))}</span>
       <small>Shared by ${names}</small></span>
     <span class="rise">${s.sharers.length}×</span></button>`
 }
@@ -1095,8 +1106,8 @@ function renderFollows() {
       : '<span class="dim">0</span>'
     return `<tr data-did="${esc(r.did)}" class="${fv.selected.has(r.did) ? 'sel' : ''}">
       <td><input type="checkbox" data-pick ${fv.selected.has(r.did) ? 'checked' : ''} aria-label="Select ${esc(r.handle)}"></td>
-      <td><div class="who-cell"><img loading="lazy" src="${esc(r.avatar ?? '')}" alt="">
-        <div><b>${esc(r.displayName || r.handle || r.did)}</b><small>@${esc(r.handle ?? '')}${r.muted.length ? ' · muted' : ''}</small></div></div></td>
+      <td><div class="who-cell"><img loading="lazy" data-profile="${esc(r.did)}" src="${esc(r.avatar ?? '')}" alt="">
+        <div><b data-profile="${esc(r.did)}">${esc(r.displayName || r.handle || r.did)}</b><small data-profile="${esc(r.did)}">@${esc(r.handle ?? '')}${r.muted.length ? ' · muted' : ''}</small></div></div></td>
       <td>${r.followedBy.map((s) => badge(s)).join(' ')}</td>
       <td class="num">${r.posts}</td>
       <td class="num">${r.replies}</td>
@@ -1403,6 +1414,7 @@ document.addEventListener('click', async (e) => {
       case 'reply': openCompose({ replyTo: known?.post }); break
       case 'quote': openCompose({ quote: known?.post }); break
       case 'thread': await showThread(uri); break
+      case 'share': openShareMenu(known?.post, btn); break
     }
   } catch (err) {
     toast(err.message)
@@ -1909,7 +1921,7 @@ async function openProfileCard(did, anchor) {
   const card = $('#profileCard')
   clearTimeout(pc.hideTimer)
   // An open dialog (e.g. a thread) is drawn above everything else, so the card has to live inside it
-  const host = document.querySelector('dialog[open]') ?? document.body
+  const host = topLayerHost()
   if (card.parentElement !== host) host.append(card)
   pc.did = did
   pc.anchor = anchor
@@ -1961,8 +1973,10 @@ document.addEventListener('mouseout', (e) => {
 // Click/tap opens it straight away (touch screens have no hover)
 document.addEventListener('click', (e) => {
   const t = e.target.closest('[data-profile]')
-  if (t) {
+  if (t && !t.closest('#profileCard')) {
+    if (t.tagName === 'A') return // an @mention link still opens normally
     e.preventDefault()
+    e.stopPropagation() // not the quote or row it's sitting in
     clearTimeout(pc.showTimer)
     openProfileCard(t.dataset.profile, t)
     return
@@ -1971,7 +1985,9 @@ document.addEventListener('click', (e) => {
 }, true)
 document.querySelectorAll('dialog').forEach((d) => d.addEventListener('close', () => {
   closeProfileCard()
-  document.body.append($('#profileCard'))
+  closeShareMenu()
+  // Back to the next dialog down, or the page
+  topLayerHost().append($('#profileCard'), $('#toast'), $('#shareMenu'))
 }))
 document.addEventListener('keydown', (e) => e.key === 'Escape' && closeProfileCard())
 addEventListener('scroll', () => !$('#profileCard').classList.contains('sheet-mode') && closeProfileCard(), { passive: true })
@@ -2041,6 +2057,514 @@ $('#profileCard').addEventListener('click', async (e) => {
   }
 })
 
+// ---------- share menu (same choices as bsky.app) ----------
+
+function closeShareMenu() {
+  $('#shareMenu').hidden = true
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    const box = document.createElement('textarea')
+    box.value = text
+    topLayerHost().append(box)
+    box.select()
+    document.execCommand('copy')
+    box.remove()
+  }
+}
+
+function openShareMenu(post, anchor) {
+  if (!post) return toast('That post is no longer available')
+  const menu = $('#shareMenu')
+  if (!menu.hidden && menu.dataset.uri === post.uri) return closeShareMenu()
+  // Authors can hide their posts from logged-out viewers; a link or embed wouldn't work for most people
+  const loggedInOnly = (post.author.labels ?? []).some((l) => l.val === '!no-unauthenticated')
+  const canEmbed = innerWidth >= 800 && !loggedInOnly
+  menu.dataset.uri = post.uri
+  menu.innerHTML = `
+    ${loggedInOnly ? '' : '<button data-share="copy">Copy link to post <span>🔗</span></button>'}
+    <button data-share="chat">Send via chat <span>✉</span></button>
+    ${canEmbed ? '<button data-share="embed">Embed post <span>&lt;/&gt;</span></button>' : ''}
+    ${loggedInOnly ? '<p class="dim">Note: This post is only visible to logged-in users.</p>' : ''}`
+  menu._post = post
+  const host = topLayerHost()
+  if (menu.parentElement !== host) host.append(menu)
+  menu.hidden = false
+  const r = anchor.getBoundingClientRect()
+  menu.style.left = `${Math.min(Math.max(8, r.left), innerWidth - menu.offsetWidth - 8)}px`
+  const below = r.bottom + 4
+  menu.style.top = `${below + menu.offsetHeight > innerHeight - 8 ? Math.max(8, r.top - menu.offsetHeight - 4) : below}px`
+}
+
+$('#shareMenu').addEventListener('click', async (e) => {
+  const action = e.target.closest('[data-share]')?.dataset.share
+  if (!action) return
+  const post = $('#shareMenu')._post
+  closeShareMenu()
+  if (action === 'copy') {
+    await copyText(postUrl(post))
+    toast('Copied to clipboard')
+  }
+  if (action === 'chat') openSendViaChat(post)
+  if (action === 'embed') openEmbedDialog(post)
+})
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#shareMenu') && !e.target.closest('[data-act="share"]')) closeShareMenu()
+}, true)
+document.addEventListener('keydown', (e) => e.key === 'Escape' && closeShareMenu())
+addEventListener('scroll', closeShareMenu, { passive: true })
+
+// Same snippet as Bluesky's "Embed post", which their embed script turns into a post card
+function embedSnippet(post, colorMode) {
+  const html = (v) => String(v ?? '').replace(/["'&<>]/g, (c) => ({ '"': '&quot;', '&': '&amp;', "'": '&#x27;', '<': '&lt;', '>': '&gt;' })[c])
+  const rec = post.record ?? {}
+  const rkey = post.uri.split('/').pop()
+  const profileHref = `https://bsky.app/profile/${post.author.did}?ref_src=embed`
+  const href = `https://bsky.app/profile/${post.author.did}/post/${rkey}?ref_src=embed`
+  const date = new Intl.DateTimeFormat(undefined, { dateStyle: 'long', timeStyle: 'short' }).format(new Date(post.indexedAt))
+  return `<blockquote class="bluesky-embed" data-bluesky-uri="${html(post.uri)}" data-bluesky-cid="${html(post.cid)}" data-bluesky-embed-color-mode="${html(colorMode)}"><p lang="${html(rec.langs?.[0] ?? '')}">${html(rec.text)}${rec.embed ? `<br><br><a href="${html(href)}">[image or embed]</a>` : ''}</p>&mdash; ${html(post.author.displayName || post.author.handle)} (<a href="${html(profileHref)}">@${html(post.author.handle)}</a>) <a href="${html(href)}">${html(date)}</a></blockquote><script async src="https://embed.bsky.app/static/embed.js" charset="utf-8"></script>`
+}
+
+function openEmbedDialog(post) {
+  let mode = 'system'
+  $('#adTitle').textContent = 'Embed post'
+  const body = $('#adBody')
+  body.innerHTML = `<p class="dim">Embed this post in your website. Simply copy the following snippet and paste it into the HTML code of your website.</p>
+    <details class="embed-options"><summary>Customization options</summary>
+      <div class="embed-theme"><b>Color theme</b>
+        <div class="seg" id="embedMode">${['system', 'light', 'dark'].map((m) => `<button type="button" data-value="${m}" class="${m === mode ? 'on' : ''}">${m[0].toUpperCase() + m.slice(1)}</button>`).join('')}</div></div></details>
+    <div class="embed-copy"><input id="embedCode" readonly aria-label="Embed HTML code" value=""><button type="button" class="primary" id="embedCopy">Copy code</button></div>`
+  const code = $('#embedCode')
+  const draw = () => (code.value = embedSnippet(post, mode))
+  draw()
+  code.onfocus = () => code.select()
+  $('#embedMode').onclick = (e) => {
+    const b = e.target.closest('button[data-value]')
+    if (!b) return
+    mode = b.dataset.value
+    $('#embedMode').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b))
+    draw()
+  }
+  $('#embedCopy').onclick = async (e) => {
+    await copyText(code.value)
+    e.target.textContent = '✓ Copied!'
+    setTimeout(() => (e.target.textContent = 'Copy code'), 2000)
+  }
+  $('#actionDialog').showModal()
+}
+
+// "Send post to…": pick a recent chat or find someone, then send
+async function openSendViaChat(post) {
+  const slot = state.actAs
+  $('#adTitle').textContent = 'Send post to…'
+  const body = $('#adBody')
+  body.innerHTML = `<p class="dim chat-as">Sending as ${esc(acctName(slot))}</p>
+    <input id="chatSearch" class="chat-search" type="search" placeholder="Search for someone" autocomplete="off" aria-label="Search for someone">
+    <div id="chatList" class="chat-list"><div class="dim">Loading your chats…</div></div>`
+  $('#actionDialog').showModal()
+
+  const canMessage = (p) => p.allowIncoming === 'all' || (p.allowIncoming === 'following' && p.followedBy)
+  const row = (p, attrs, enabled = true) => `<button type="button" class="chat-row" ${attrs} ${enabled ? '' : 'disabled'}>
+      <img src="${esc(p.avatar ?? '')}" alt=""><span><b>${esc(p.displayName || p.handle)}</b><small>@${esc(p.handle)}${enabled ? '' : ' · can\'t be messaged'}</small></span></button>`
+  const list = $('#chatList')
+  let recent = []
+  const drawRecent = () => {
+    list.innerHTML = recent.length
+      ? recent.map((c, i) => row(c.members[0], `data-convo="${i}"`)).join('')
+      : '<div class="dim">No recent chats. Search for someone above.</div>'
+  }
+  try {
+    recent = await api(`/api/chat/recent?slot=${slot}`)
+    drawRecent()
+  } catch (err) {
+    list.innerHTML = `<div class="error">${esc(err.message)}</div>`
+    $('#chatSearch').hidden = true
+    return
+  }
+
+  let found = []
+  let timer = 0
+  $('#chatSearch').oninput = (e) => {
+    clearTimeout(timer)
+    const q = e.target.value.trim()
+    if (!q) return drawRecent()
+    timer = setTimeout(async () => {
+      try {
+        found = await api(`/api/chat/search?slot=${slot}&q=${encodeURIComponent(q)}`)
+        list.innerHTML = found.length
+          ? found.map((p, i) => row(p, `data-person="${i}"`, canMessage(p))).join('')
+          : '<div class="dim">No one found.</div>'
+      } catch (err) {
+        list.innerHTML = `<div class="error">${esc(err.message)}</div>`
+      }
+    }, 250)
+  }
+  list.onclick = (e) => {
+    const b = e.target.closest('.chat-row')
+    if (!b || b.disabled) return
+    if (b.dataset.convo !== undefined) {
+      const c = recent[Number(b.dataset.convo)]
+      confirmSend(post, slot, c.members[0], { convoId: c.convoId })
+    } else {
+      const p = found[Number(b.dataset.person)]
+      confirmSend(post, slot, p, { did: p.did })
+    }
+  }
+}
+
+function confirmSend(post, slot, person, target) {
+  const body = $('#adBody')
+  body.innerHTML = `<p>To <b>${esc(person.displayName || person.handle)}</b> <span class="dim">@${esc(person.handle)}</span>, from ${esc(acctName(slot))}</p>
+    <div class="card chat-preview">${renderPost(post, { small: true })}</div>
+    <textarea id="chatText" class="chat-text" rows="3" maxlength="1000" placeholder="Add a message (optional)"></textarea>
+    <div class="ad-foot"><button type="button" class="secondary" data-close>Cancel</button><button type="button" class="primary" id="chatSend">Send</button></div>`
+  $('#chatText').focus()
+  $('#chatSend').onclick = async (e) => {
+    e.target.disabled = true
+    try {
+      await api('/api/chat/send', { slot, uri: post.uri, cid: post.cid, text: $('#chatText').value, ...target })
+      $('#actionDialog').close()
+      toast(`Sent to @${person.handle}`)
+    } catch (err) {
+      toast(err.message)
+      e.target.disabled = false
+    }
+  }
+}
+
+// ---------- notifications (modeled on Bluesky's new notifications beta) ----------
+
+const NF_TABS = [['all', 'All'], ['people-i-follow', 'People I follow'], ['conversations', 'Replies'], ['followers', 'Follows'], ['activity', 'Post alerts']]
+const nf = { feed: 'all', groups: [], cursor: null, newestAt: null, loading: false, seq: 0, unread: {}, expanded: new Set(), extraActors: new Map() }
+const NF_ICONS = { like: ['♥', 'like'], repost: ['🔁', 'repost'], likeViaRepost: ['♥', 'like'], repostViaRepost: ['🔁', 'repost'],
+  multiPostLike: ['♥', 'like'], multiPostRepost: ['🔁', 'repost'], multiPostLikeViaRepost: ['♥', 'like'], multiPostRepostViaRepost: ['🔁', 'repost'],
+  follow: ['+', 'follow'], followBack: ['+', 'follow'], reply: ['↩', 'talk'], quote: ['❝', 'talk'], mention: ['@', 'talk'], subscribedPost: ['🔔', 'follow'],
+  verified: ['✓', 'follow'], unverified: ['✕', 'muted'], starterPackJoined: ['+', 'follow'], contactMatch: ['+', 'follow'], generatorLike: ['♥', 'like'] }
+
+async function refreshUnread() {
+  if (!state.accounts.length) return
+  try {
+    nf.unread = await api('/api/notifications/unread')
+  } catch {
+    return
+  }
+  const total = Object.values(nf.unread).reduce((a, b) => a + b, 0)
+  const badgeEl = $('#notifBadge')
+  badgeEl.hidden = total === 0
+  badgeEl.textContent = total > 99 ? '99+' : total
+  renderNotifHeader()
+}
+
+function renderNotifHeader() {
+  $('#nfAccount').hidden = state.accounts.length < 2
+  $('#nfAccount').innerHTML = state.accounts.map((a) => {
+    const n = nf.unread[a.slot] ?? 0
+    return `<button type="button" data-slot="${a.slot}" class="${a.slot === state.actAs ? 'on' : ''}" title="@${esc(a.handle)}">${badge(a.slot)} ${n ? `<span class="nf-count">${n > 99 ? '99+' : n}</span>` : ''}</button>`
+  }).join('')
+  $('#nfTabs').innerHTML = NF_TABS.map(([k, l]) => `<button type="button" data-value="${k}" class="${nf.feed === k ? 'on' : ''}">${l}</button>`).join('')
+}
+
+async function loadNotifications(reset = false) {
+  if (!reset && (nf.loading || !nf.cursor)) return
+  const seq = ++nf.seq
+  nf.loading = true
+  const slot = state.actAs
+  const end = $('#nfEnd')
+  if (reset) {
+    nf.groups = []
+    nf.cursor = null
+    nf.expanded.clear()
+    nf.extraActors.clear()
+    $('#nfPill').hidden = true
+    $('#nfList').innerHTML = ''
+    renderNotifHeader()
+  }
+  end.textContent = 'Loading…'
+  try {
+    const q = new URLSearchParams({ slot, feed: nf.feed })
+    if (nf.cursor) q.set('cursor', nf.cursor)
+    const data = await api(`/api/notifications?${q}`)
+    if (seq !== nf.seq) return
+    nf.groups.push(...data.groups)
+    nf.cursor = data.cursor
+    if (reset) {
+      nf.newestAt = data.newestAt
+      // As on Bluesky, only "All" marks notifications as seen, since the other tabs leave things out.
+      // What's already drawn stays tinted until the next refresh.
+      if (nf.feed === 'all' && data.newestAt && (!data.seenAt || data.newestAt > data.seenAt)) {
+        api('/api/notifications/seen', { slot, seenAt: data.newestAt }).then(refreshUnread).catch(() => {})
+      }
+    }
+    renderNotifications()
+    end.textContent = nf.cursor ? '' : nf.groups.length ? "That's all your notifications." : ''
+  } catch (err) {
+    if (seq === nf.seq) end.textContent = `Couldn't load notifications: ${err.message}`
+  } finally {
+    if (seq === nf.seq) nf.loading = false
+  }
+}
+
+new IntersectionObserver((entries) => {
+  if (entries.some((e) => e.isIntersecting) && state.view === 'notifications' && nf.cursor) loadNotifications()
+}, { rootMargin: '600px' }).observe($('#nfEnd'))
+
+async function checkNewNotifications() {
+  if (state.view !== 'notifications' || document.hidden || !nf.newestAt) return
+  try {
+    const q = new URLSearchParams({ slot: state.actAs, feed: nf.feed, limit: 1 })
+    const { newestAt } = await api(`/api/notifications?${q}`)
+    if (newestAt && newestAt > nf.newestAt) $('#nfPill').hidden = false
+  } catch {}
+}
+
+function nfName(p) {
+  return `<b data-profile="${esc(p.did)}">${esc(p.displayName || p.handle)}</b>`
+}
+
+function nfAvatar(p, type) {
+  const [icon, tone] = NF_ICONS[type] ?? ['•', 'muted']
+  return `<div class="nf-avatar"><img class="avatar" data-profile="${esc(p.did)}" loading="lazy" src="${esc(p.avatar ?? '')}" alt=""><span class="nf-icon nf-${tone}">${icon}</span></div>`
+}
+
+function nfThumbs(post) {
+  const e = post.embed
+  const images = e?.images ?? e?.media?.images
+  const blur = isSensitive(post.labels)
+  if (images?.length) return `<div class="nf-thumbs">${images.slice(0, 2).map((i) => `<img loading="lazy" src="${esc(i.thumb)}" alt="${esc(i.alt)}" class="${blur ? 'blurred' : ''}">`).join('')}</div>`
+  const thumb = e?.thumbnail ?? e?.media?.thumbnail
+  return thumb ? `<div class="nf-thumbs"><img loading="lazy" src="${esc(thumb)}" alt="" class="${blur ? 'blurred' : ''}"></div>` : ''
+}
+
+// "A liked…", "A and B liked…" or "A and 24 others liked…". A pair is fully named, so it doesn't expand.
+function nfSentence(g, verb) {
+  const [first, second] = g.actors
+  const others = g.count - 1
+  if (others <= 0) return { html: `${nfName(first)} ${verb}`, expands: false }
+  if (others === 1 && second) return { html: `${nfName(first)} and ${nfName(second)} ${verb}`, expands: false }
+  return { html: `${nfName(first)} and <b>${others.toLocaleString()} ${others === 1 ? 'other' : 'others'}</b> ${verb}`, expands: true }
+}
+
+function nfActorList(g) {
+  const actors = [...g.actors, ...(nf.extraActors.get(g.id) ?? [])]
+  const left = g.actorDids.filter((d) => !actors.some((a) => a.did === d)).length
+  return `<div class="nf-people">${actors.map((a) => `<div class="nf-person"><img class="avatar" data-profile="${esc(a.did)}" loading="lazy" src="${esc(a.avatar ?? '')}" alt="">
+      <span>${nfName(a)}<small class="dim" data-profile="${esc(a.did)}">@${esc(a.handle)}</small></span></div>`).join('')}
+    ${left ? `<button type="button" class="link-btn" data-nf="more" data-id="${esc(g.id)}">Show more</button>` : ''}</div>`
+}
+
+function nfAvatarRow(g, expandable) {
+  const open = nf.expanded.has(g.id)
+  if (!expandable) return ''
+  return `<button type="button" class="nf-row-avatars" data-nf="expand" data-id="${esc(g.id)}" aria-expanded="${open}" aria-label="${open ? 'Collapse' : 'Expand'} list of users">
+    ${g.actors.slice(1, 8).map((a) => `<img src="${esc(a.avatar ?? '')}" alt="">`).join('')}<span class="nf-chevron">${open ? '▲' : '▼'}</span></button>`
+}
+
+function nfParent(g) {
+  const p = g.parent
+  if (!p) return ''
+  const inReply = g.type !== 'reply'
+  if (p.type !== 'post') {
+    const what = p.type === 'blocked' ? 'a blocked post' : 'a deleted post'
+    return `<div class="nf-context">${inReply ? 'in reply to' : 'replied to'} ${what}</div>`
+  }
+  const mine = p.post.author.did === state.accounts.find((a) => a.slot === state.actAs)?.did
+  const who = mine ? '<b>you</b>' : nfName(p.post.author)
+  const text = (p.post.record?.text ?? '').replace(/\s+/g, ' ').trim()
+  return `<div class="nf-context">${inReply ? 'in reply to' : 'replied to'} ${who}${text ? `: ${esc(text)}` : ''}</div>`
+}
+
+// A notification about someone's post: who, what it answers, the post itself, and ways to respond
+function nfPostRow(id, type, post, parentHolder, isRead, at) {
+  const viewer = { [state.actAs]: { like: post.viewer?.like, repost: post.viewer?.repost } }
+  state.posts.set(post.uri, { post, viewer })
+  return `<article class="nf-item ${isRead ? '' : 'unread'}" data-nf-post="${esc(post.uri)}">
+    ${nfAvatar(post.author, type)}
+    <div class="nf-main">
+      <div class="meta">${nfName(post.author).replace('<b ', '<span class="name" ').replace('</b>', '</span>')}
+        <span class="handle" data-profile="${esc(post.author.did)}">@${esc(post.author.handle)}</span></div>
+      ${nfParent(parentHolder)}
+      <div class="text">${renderText(post.record?.text, post.record?.facets)}</div>
+      ${renderEmbed(post)}
+      <time class="nf-time" title="${esc(new Date(at).toLocaleString())}">${ago(at)}</time>
+      ${renderActions(post, viewer)}
+    </div></article>`
+}
+
+function nfProfileBio(p) {
+  return p.description ? `<div class="nf-preview">${esc(p.description)}</div>` : ''
+}
+
+function renderNfItem(g) {
+  const at = g.indexedAt
+  const base = (type, primaryProfile, inner, attrs = '', trailing = '') => `<article class="nf-item ${g.isRead ? '' : 'unread'}" ${attrs}>
+      ${nfAvatar(primaryProfile, type)}
+      <div class="nf-main">${inner}<time class="nf-time" title="${esc(new Date(at).toLocaleString())}">${ago(at)}</time></div>${trailing}</article>`
+
+  switch (g.type) {
+    case 'reply':
+    case 'quote':
+    case 'mention':
+      return nfPostRow(g.id, g.type, g.post, g, g.isRead, at)
+    case 'subscribedPost':
+      return g.items.map((i) => nfPostRow(g.id, 'subscribedPost', i.post, { type: 'reply', parent: i.parent }, g.isRead, at)).join('')
+    case 'like':
+    case 'repost':
+    case 'likeViaRepost':
+    case 'repostViaRepost': {
+      const verb = { like: 'liked your post', repost: 'reposted your post', likeViaRepost: 'liked your repost', repostViaRepost: 'reposted your repost' }[g.type]
+      const { html, expands } = nfSentence(g, verb)
+      const preview = (g.post.record?.text ?? '').replace(/\s+/g, ' ').trim()
+      return base(g.type, g.actors[0], `${nfAvatarRow(g, expands)}<div class="nf-sentence">${html}</div>
+        ${preview ? `<div class="nf-preview">${esc(preview)}</div>` : ''}
+        ${nf.expanded.has(g.id) ? nfActorList(g) : ''}`, `data-nf-open="${esc(g.post.uri)}"`, nfThumbs(g.post))
+    }
+    case 'multiPostLike':
+    case 'multiPostRepost':
+    case 'multiPostLikeViaRepost':
+    case 'multiPostRepostViaRepost': {
+      const verb = g.type.includes('Like') ? 'liked' : 'reposted'
+      const noun = g.type.includes('ViaRepost') ? 'repost' : 'post'
+      const open = nf.expanded.has(g.id)
+      const preview = (g.posts[0].record?.text ?? '').replace(/\s+/g, ' ').trim()
+      return base(g.type, g.actor, `<div class="nf-sentence">${nfName(g.actor)} ${verb} <b>${g.count}</b> of your ${noun}${g.count === 1 ? '' : 's'}
+          <button type="button" class="nf-toggle" data-nf="expand" data-id="${esc(g.id)}" aria-expanded="${open}">${open ? '▲' : '▼'}</button></div>
+        ${preview && !open ? `<div class="nf-preview">${esc(preview)}</div>` : ''}
+        ${open ? `<div class="nf-people">${g.posts.map((p) => `<button type="button" class="nf-post-link" data-open-thread="${esc(p.uri)}">${esc((p.record?.text ?? '').replace(/\s+/g, ' ').trim() || 'Post with media')}</button>`).join('')}</div>` : ''}`, `data-nf-toggle="${esc(g.id)}"`)
+    }
+    case 'follow': {
+      const { html, expands } = nfSentence(g, 'followed you')
+      const via = g.starterPack ? `<div class="nf-preview">via starter pack ${esc(g.starterPack.record?.name ?? '')}</div>` : ''
+      return base('follow', g.actors[0], `${nfAvatarRow(g, expands)}<div class="nf-sentence">${html}</div>${via}${nf.expanded.has(g.id) ? nfActorList(g) : ''}`,
+        expands ? `data-nf-toggle="${esc(g.id)}"` : `data-nf-profile="${esc(g.actors[0].did)}"`)
+    }
+    case 'followBack':
+      return base('followBack', g.actor, `<div class="nf-sentence">${nfName(g.actor)} followed you back! 🎉</div>${nfProfileBio(g.actor)}`, `data-nf-profile="${esc(g.actor.did)}"`)
+    case 'verified':
+      return base('verified', g.actor, `<div class="nf-sentence">${nfName(g.actor)} verified you</div>`, `data-nf-profile="${esc(g.actor.did)}"`)
+    case 'unverified':
+      return base('unverified', g.actor, `<div class="nf-sentence">${nfName(g.actor)} removed their verification from your account</div>`, `data-nf-profile="${esc(g.actor.did)}"`)
+    case 'starterPackJoined':
+      return base('starterPackJoined', g.actor, `<div class="nf-sentence">${nfName(g.actor)} joined Bluesky with your starter pack${g.starterPack?.record?.name ? ` ${esc(g.starterPack.record.name)}` : ''}</div>`, `data-nf-profile="${esc(g.actor.did)}"`)
+    case 'contactMatch':
+      return base('contactMatch', g.actor, `<div class="nf-sentence">${nfName(g.actor)}, from your contacts, is on Bluesky</div>${nfProfileBio(g.actor)}`, `data-nf-profile="${esc(g.actor.did)}"`)
+    case 'generatorLike': {
+      const { html, expands } = nfSentence(g, `liked your custom feed <b>${esc(g.generator.displayName ?? '')}</b>`)
+      return base('generatorLike', g.actors[0], `${nfAvatarRow(g, expands)}<div class="nf-sentence">${html}</div>${nf.expanded.has(g.id) ? nfActorList(g) : ''}`, expands ? `data-nf-toggle="${esc(g.id)}"` : '')
+    }
+    default:
+      return ''
+  }
+}
+
+// The Follows tab is a list of people rather than a feed, so it has no times or Today/Earlier split
+function renderFollowers() {
+  const seen = new Set()
+  const rows = []
+  for (const g of nf.groups) {
+    for (const a of g.type === 'follow' ? g.actors : g.actor ? [g.actor] : []) {
+      if (seen.has(a.did)) continue
+      seen.add(a.did)
+      const following = !!a.viewer?.following
+      rows.push(`<div class="nf-item nf-follower ${g.isRead ? '' : 'unread'}">
+        <img class="avatar" data-profile="${esc(a.did)}" loading="lazy" src="${esc(a.avatar ?? '')}" alt="">
+        <div class="nf-main">${nfName(a)}<small class="dim" data-profile="${esc(a.did)}">@${esc(a.handle)}</small></div>
+        ${following ? '<span class="pc-btn nf-following">Following</span>' : `<button type="button" class="pc-btn follow" data-nf="follow" data-did="${esc(a.did)}">Follow</button>`}</div>`)
+    }
+  }
+  return rows.length ? `<h3 class="nf-section">Followed you</h3>${rows.join('')}` : ''
+}
+
+function renderNotifications() {
+  const list = $('#nfList')
+  if (nf.feed === 'followers') {
+    list.innerHTML = renderFollowers()
+  } else {
+    const isToday = (at) => new Date(at).toDateString() === new Date().toDateString()
+    const hasToday = nf.groups.length > 0 && isToday(nf.groups[0].indexedAt)
+    let addedEarlier = false
+    let html = hasToday ? '<h3 class="nf-section">Today</h3>' : ''
+    for (const g of nf.groups) {
+      if (hasToday && !addedEarlier && !isToday(g.indexedAt)) {
+        html += '<h3 class="nf-section">Earlier</h3>'
+        addedEarlier = true
+      }
+      html += renderNfItem(g)
+    }
+    list.innerHTML = html
+  }
+  if (!nf.groups.length && !nf.cursor) {
+    list.innerHTML = `<div class="feed-end">${nf.feed === 'activity'
+      ? 'No posts here yet. Click the 🔔 bell icon on someone’s Bluesky profile to get notified when they post.'
+      : "No notifications here yet."}</div>`
+  }
+}
+
+$('#nfTabs').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-value]')
+  if (!b || nf.feed === b.dataset.value) return
+  nf.feed = b.dataset.value
+  loadNotifications(true)
+  window.scrollTo({ top: 0 })
+})
+$('#nfAccount').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-slot]')
+  if (b && Number(b.dataset.slot) !== state.actAs) setActAs(Number(b.dataset.slot))
+})
+$('#nfPill').addEventListener('click', () => {
+  loadNotifications(true)
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+})
+
+$('#nfList').addEventListener('click', async (e) => {
+  const action = e.target.closest('[data-nf]')
+  if (action) {
+    const { nf: kind, id, did } = action.dataset
+    action.disabled = true
+    try {
+      if (kind === 'expand') {
+        nf.expanded.has(id) ? nf.expanded.delete(id) : nf.expanded.add(id)
+        return renderNotifications()
+      }
+      if (kind === 'more') {
+        const g = nf.groups.find((x) => x.id === id)
+        const known = [...g.actors, ...(nf.extraActors.get(id) ?? [])]
+        const next = g.actorDids.filter((d) => !known.some((a) => a.did === d)).slice(0, 25)
+        const profiles = await api(`/api/notifications/profiles?slot=${state.actAs}&dids=${next.join(',')}`)
+        nf.extraActors.set(id, [...(nf.extraActors.get(id) ?? []), ...profiles])
+        return renderNotifications()
+      }
+      if (kind === 'follow') {
+        const res = await api('/api/follows/follow', { dids: [did], slots: [state.actAs] })
+        if (res.failed?.length) throw new Error(res.failed[0].error)
+        toast(`Followed from ${acctName(state.actAs)}`)
+        for (const g of nf.groups) {
+          for (const a of g.actors ?? (g.actor ? [g.actor] : [])) if (a.did === did) a.viewer = { ...a.viewer, following: 'yes' }
+        }
+        return renderNotifications()
+      }
+    } catch (err) {
+      toast(err.message)
+    } finally {
+      action.disabled = false
+    }
+    return
+  }
+  if (e.target.closest('a, button, [data-profile], .actions, .quote, .ext, .video, .images')) return
+  const toggleRow = e.target.closest('[data-nf-toggle]')
+  if (toggleRow) {
+    const id = toggleRow.dataset.nfToggle
+    nf.expanded.has(id) ? nf.expanded.delete(id) : nf.expanded.add(id)
+    return renderNotifications()
+  }
+  const profileRow = e.target.closest('[data-nf-profile]')
+  if (profileRow) return openProfileCard(profileRow.dataset.nfProfile, profileRow)
+  const postRow = e.target.closest('[data-nf-open], [data-nf-post]')
+  if (postRow) showThread(postRow.dataset.nfOpen ?? postRow.dataset.nfPost)
+})
+
 // ---------- language filter ----------
 
 // One setting for every feed; there's a checkbox in the feed filters and one in the Trending controls
@@ -2089,17 +2613,21 @@ function renderActAs() {
     .map((a) => `<button role="radio" class="acct-${a.slot}" aria-checked="${a.slot === state.actAs}" data-slot="${a.slot}" title="@${esc(a.handle)}">${badge(a.slot)}<span class="h">@${esc(a.handle)}</span></button>`)
     .join('')
 }
-$('#actAs').addEventListener('click', (e) => {
-  const btn = e.target.closest('button[data-slot]')
-  if (!btn) return
-  state.actAs = Number(btn.dataset.slot)
+function setActAs(slot) {
+  state.actAs = slot
   safeSet('actAs', state.actAs)
   renderActAs()
+  // Notifications belong to one account, so that tab follows whichever one you're acting as
+  if (state.view === 'notifications') return loadNotifications(true)
   // Re-draw like/repost highlights for the newly selected account
   document.querySelectorAll('.actions[data-uri]').forEach((el) => {
     const known = state.posts.get(el.dataset.uri)
     if (known) el.outerHTML = renderActions(known.post, known.viewer)
   })
+}
+$('#actAs').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-slot]')
+  if (btn) setActAs(Number(btn.dataset.slot))
 })
 
 function renderWho(follows) {
@@ -2164,6 +2692,11 @@ async function init() {
     if (state.view === 'follows' && st?.backfill.running && !$('#actionDialog').open) loadFollows()
   }, 10_000)
   setInterval(checkNew, 30_000)
+  refreshUnread()
+  setInterval(() => {
+    refreshUnread()
+    checkNewNotifications()
+  }, 30_000)
 }
 
 init()

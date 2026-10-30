@@ -13,6 +13,7 @@ import { isEnglish } from './lang.ts'
 import { judgeRow, judge, rulesFor, saveRules, setAuthor, suggestedAuthors, searchText, type Verdict } from './rules.ts'
 import { discover, dismiss, audition, auditionList, refreshDiscover, discoverStatus, clearDiscoverCache } from './discover.ts'
 import { uploadLimits, jobStatus, videoEmbed } from './video.ts'
+import { groupedNotifications, unreadCounts, markSeen, profilesFor, recentChats, searchPeople, sendPostViaChat } from './notifs.ts'
 
 type Query = URLSearchParams
 type Handler = (q: Query, body: any) => Promise<unknown>
@@ -259,7 +260,7 @@ const routes: Record<string, Handler> = {
       .map((s: any) => ({
         post: views.get(s.uri),
         viewer: viewer.get(s.uri) ?? {},
-        sharers: s.sharers.map((d: string) => names.get(d) ?? d),
+        sharers: s.sharers.map((d: string) => ({ did: d, handle: names.get(d) ?? d })),
       }))
       .filter((s: any) => s.post && !s.post.author.viewer?.muted && !s.post.author.viewer?.blocking)
       // Shared posts are often by people you don't follow, so they may not be stored; judge from the post itself
@@ -276,6 +277,20 @@ const routes: Record<string, Handler> = {
     const rows = postsForTopic(term, hours, q.get('who') ?? 'all', Number(q.get('before')) || null, limit, q.get('lang') === 'en')
     return buildItems(rows, limit)
   },
+
+  // ---------- notifications ----------
+
+  'GET /api/notifications': async (q) =>
+    groupedNotifications(q.get('slot'), q.get('feed') ?? 'all', q.get('cursor'), Number(q.get('limit')) || 30),
+  'GET /api/notifications/unread': async () => unreadCounts(),
+  'POST /api/notifications/seen': async (_q, b) => markSeen(b.slot, b.seenAt),
+  'GET /api/notifications/profiles': async (q) => profilesFor(q.get('slot'), (q.get('dids') ?? '').split(',').filter(Boolean)),
+
+  // ---------- send via chat ----------
+
+  'GET /api/chat/recent': async (q) => recentChats(q.get('slot')),
+  'GET /api/chat/search': async (q) => searchPeople(q.get('slot'), q.get('q') ?? ''),
+  'POST /api/chat/send': async (_q, b) => sendPostViaChat(b),
 
   // ---------- video ----------
 

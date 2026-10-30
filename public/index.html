@@ -21,6 +21,7 @@
 
   <nav class="tabs" aria-label="Views">
     <button class="tab active" data-tab="following">Following</button>
+    <button class="tab" data-tab="notifications">Notifications <span class="tab-badge" id="notifBadge" hidden></span></button>
     <button class="tab" data-tab="keywords">Keywords</button>
     <button class="tab" data-tab="follows">Follows</button>
     <button class="tab" data-tab="trending">Trending</button>
@@ -56,6 +57,17 @@
       <div id="trNote" class="fv-note"></div>
       <div id="trHead" class="trend-head" hidden></div>
       <div id="trList" class="trend-list"></div>
+    </section>
+
+    <section id="notifView" class="notif-view" hidden>
+      <div class="nf-head">
+        <div class="seg nf-account" id="nfAccount" aria-label="Which account's notifications"></div>
+        <a class="pc-btn" href="https://bsky.app/notifications/settings" target="_blank" rel="noopener" title="Open notification settings on Bluesky">⚙ Settings ↗</a>
+      </div>
+      <div class="seg nf-tabs" id="nfTabs"></div>
+      <button type="button" class="new-banner" id="nfPill" hidden>Load new notifications</button>
+      <div id="nfList" class="nf-list"></div>
+      <div id="nfEnd" class="feed-end"></div>
     </section>
 
     <section id="discoverView" class="discover-view" hidden>
@@ -170,6 +182,7 @@
   </dialog>
 
   <div id="profileCard" class="profile-card" role="dialog" aria-label="Profile" hidden></div>
+  <div id="shareMenu" class="share-menu" role="menu" hidden></div>
   <div id="toast" class="toast" role="status" hidden></div>
   <script src="app.js"></script>
 </body>
