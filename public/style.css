@@ -498,7 +498,8 @@ a.pc-btn:hover { text-decoration: none; border-color: var(--accent); }
   display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; margin-left: 2px;
   border-radius: 9px; background: var(--accent); color: var(--accent-text); font-size: 11px; font-weight: 700;
 }
-.nf-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
+.nf-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+.nf-head .nf-account { margin-right: auto; }
 .nf-account button { display: inline-flex; align-items: center; gap: 5px; }
 .nf-count { font-size: 11px; font-weight: 700; color: var(--accent); }
 .nf-tabs { margin-bottom: 10px; }

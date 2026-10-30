@@ -189,7 +189,37 @@ function whoDid(viewer, key) {
   return Object.entries(viewer ?? {}).filter(([, v]) => v?.[key]).map(([slot]) => Number(slot))
 }
 
+// Bluesky's read servers take a moment to reflect a like or repost, so asking right after one often
+// still says "not liked". What you just did is remembered here and wins until they've caught up.
+const LOCAL_ACTION_MS = 2 * 60_000
+const localActions = new Map() // "slot|uri|kind" -> { value: record uri or null if removed, at }
+const COUNT_FIELD = { like: 'likeCount', repost: 'repostCount' }
+
+function applyLocalActions(post, viewer) {
+  for (const kind of ['like', 'repost']) {
+    for (const { slot } of state.accounts) {
+      const key = `${slot}|${post.uri}|${kind}`
+      const rec = localActions.get(key)
+      if (!rec) continue
+      if (Date.now() - rec.at > LOCAL_ACTION_MS) {
+        localActions.delete(key)
+        continue
+      }
+      const known = viewer[slot]
+      const have = known?.[kind]
+      if (!!rec.value === !!have) {
+        if (rec.value) viewer[slot] = { ...known, [kind]: rec.value }
+        continue
+      }
+      viewer[slot] = { ...known, [kind]: rec.value ?? undefined }
+      // Only adjust the count when this view knew this account's state; otherwise it can't tell
+      if (known) post[COUNT_FIELD[kind]] = Math.max(0, (post[COUNT_FIELD[kind]] ?? 0) + (rec.value ? 1 : -1))
+    }
+  }
+}
+
 function renderActions(post, viewer) {
+  applyLocalActions(post, viewer)
   const likedBy = whoDid(viewer, 'like')
   const repostedBy = whoDid(viewer, 'repost')
   const mine = viewer?.[state.actAs] ?? {}
@@ -1364,6 +1394,7 @@ async function runAction(kind, rows) {
 async function refreshPost(uri) {
   const fresh = await api(`/api/post?uri=${encodeURIComponent(uri)}`)
   if (!fresh.post) return null
+  applyLocalActions(fresh.post, fresh.viewer)
   state.posts.set(uri, fresh)
   document.querySelectorAll(`.actions[data-uri="${CSS.escape(uri)}"]`).forEach((el) => {
     el.outerHTML = renderActions(fresh.post, fresh.viewer)
@@ -1372,24 +1403,40 @@ async function refreshPost(uri) {
 }
 
 // Like or repost as the selected account, warning if the other account already did
-async function toggle(uri, kind) {
-  const fresh = await refreshPost(uri)
-  if (!fresh) return toast('That post is no longer available')
-  const { post, viewer } = fresh
-  const slot = state.actAs
-  const existing = viewer[slot]?.[kind]
-  const verb = kind === 'like' ? 'liked' : 'reposted'
+const togglesRunning = new Set()
 
-  if (existing) {
-    await api(`/api/un${kind}`, { slot, uri, [`${kind}Uri`]: existing })
-    toast(`Removed ${kind} from ${acctName(slot)}`)
-  } else {
-    const others = whoDid(viewer, kind).filter((s) => s !== slot)
-    if (others.length && !confirm(`Already ${verb} by ${others.map(acctName).join(' and ')}.\n\n${kind === 'like' ? 'Like' : 'Repost'} it from ${acctName(slot)} too?`)) return
-    await api(`/api/${kind}`, { slot, uri, cid: post.cid })
-    toast(`${kind === 'like' ? 'Liked' : 'Reposted'} as ${acctName(slot)}`)
+async function toggle(uri, kind) {
+  // Redrawing replaces the button, so a quick second click could otherwise start a second like
+  const running = `${uri}|${kind}`
+  if (togglesRunning.has(running)) return
+  togglesRunning.add(running)
+  try {
+    const fresh = await refreshPost(uri)
+    if (!fresh) return toast('That post is no longer available')
+    const { post, viewer } = fresh
+    const slot = state.actAs
+    const existing = viewer[slot]?.[kind]
+    const verb = kind === 'like' ? 'liked' : 'reposted'
+    const key = `${slot}|${uri}|${kind}`
+
+    if (existing) {
+      await api(`/api/un${kind}`, { slot, uri, [`${kind}Uri`]: existing })
+      localActions.set(key, { value: null, at: Date.now() })
+      toast(`Removed ${kind} from ${acctName(slot)}`)
+    } else {
+      const others = whoDid(viewer, kind).filter((s) => s !== slot)
+      if (others.length && !confirm(`Already ${verb} by ${others.map(acctName).join(' and ')}.\n\n${kind === 'like' ? 'Like' : 'Repost'} it from ${acctName(slot)} too?`)) return
+      const res = await api(`/api/${kind}`, { slot, uri, cid: post.cid })
+      localActions.set(key, { value: res.uri, at: Date.now() })
+      toast(`${kind === 'like' ? 'Liked' : 'Reposted'} as ${acctName(slot)}`)
+    }
+    // Draw the result now rather than asking Bluesky again, which may not have caught up yet
+    document.querySelectorAll(`.actions[data-uri="${CSS.escape(uri)}"]`).forEach((el) => {
+      el.outerHTML = renderActions(post, viewer)
+    })
+  } finally {
+    togglesRunning.delete(running)
   }
-  await refreshPost(uri)
 }
 
 document.addEventListener('click', async (e) => {
@@ -2238,7 +2285,7 @@ function confirmSend(post, slot, person, target) {
 // ---------- notifications (modeled on Bluesky's new notifications beta) ----------
 
 const NF_TABS = [['all', 'All'], ['people-i-follow', 'People I follow'], ['conversations', 'Replies'], ['followers', 'Follows'], ['activity', 'Post alerts']]
-const nf = { feed: 'all', groups: [], cursor: null, newestAt: null, loading: false, seq: 0, unread: {}, expanded: new Set(), extraActors: new Map() }
+const nf = { feed: 'all', groups: [], cursor: null, newestAt: null, loading: false, seq: 0, unread: {}, clearedAt: {}, expanded: new Set(), extraActors: new Map() }
 const NF_ICONS = { like: ['♥', 'like'], repost: ['🔁', 'repost'], likeViaRepost: ['♥', 'like'], repostViaRepost: ['🔁', 'repost'],
   multiPostLike: ['♥', 'like'], multiPostRepost: ['🔁', 'repost'], multiPostLikeViaRepost: ['♥', 'like'], multiPostRepostViaRepost: ['🔁', 'repost'],
   follow: ['+', 'follow'], followBack: ['+', 'follow'], reply: ['↩', 'talk'], quote: ['❝', 'talk'], mention: ['@', 'talk'], subscribedPost: ['🔔', 'follow'],
@@ -2251,12 +2298,47 @@ async function refreshUnread() {
   } catch {
     return
   }
+  // Bluesky can take a moment to reflect "seen", so don't let an old count bring a cleared badge back
+  for (const slot of Object.keys(nf.clearedAt)) {
+    if (Date.now() - nf.clearedAt[slot] < 20_000) nf.unread[slot] = 0
+  }
+  renderUnreadBadges()
+}
+
+function renderUnreadBadges() {
   const total = Object.values(nf.unread).reduce((a, b) => a + b, 0)
   const badgeEl = $('#notifBadge')
   badgeEl.hidden = total === 0
   badgeEl.textContent = total > 99 ? '99+' : total
   renderNotifHeader()
 }
+
+// Marks everything up to `at` as seen on Bluesky, which clears it in the Bluesky app too
+async function markNotificationsSeen(slot, at) {
+  nf.clearedAt[slot] = Date.now()
+  nf.unread[slot] = 0
+  renderUnreadBadges()
+  await api('/api/notifications/seen', { slot, seenAt: new Date(at).toISOString() })
+}
+
+$('#nfMarkRead').addEventListener('click', async (e) => {
+  const slot = state.actAs
+  e.target.disabled = true
+  try {
+    await markNotificationsSeen(slot, Date.now())
+    if (slot === state.actAs) {
+      for (const g of nf.groups) g.isRead = true
+      renderNotifications()
+    }
+    toast(`Marked all as read for ${acctName(slot)}`)
+  } catch (err) {
+    delete nf.clearedAt[slot]
+    refreshUnread()
+    toast(err.message)
+  } finally {
+    e.target.disabled = false
+  }
+})
 
 function renderNotifHeader() {
   $('#nfAccount').hidden = state.accounts.length < 2
@@ -2294,8 +2376,10 @@ async function loadNotifications(reset = false) {
       nf.newestAt = data.newestAt
       // As on Bluesky, only "All" marks notifications as seen, since the other tabs leave things out.
       // What's already drawn stays tinted until the next refresh.
-      if (nf.feed === 'all' && data.newestAt && (!data.seenAt || data.newestAt > data.seenAt)) {
-        api('/api/notifications/seen', { slot, seenAt: data.newestAt }).then(refreshUnread).catch(() => {})
+      // Bluesky counts a notification as unread when its time equals the seen time, so go just past it.
+      const hasUnread = data.groups.some((g) => !g.isRead)
+      if (nf.feed === 'all' && data.newestAt && (hasUnread || (nf.unread[slot] ?? 0) > 0)) {
+        markNotificationsSeen(slot, Date.parse(data.newestAt) + 1).catch(() => {})
       }
     }
     renderNotifications()

@@ -88,7 +88,9 @@ Modeled on Bluesky's new notifications beta, using the same grouped notification
 - **Unread counts** on the tab and on each account's button, and a **Load new notifications** button when more arrive.
 
 Notifications belong to one account at a time, so the tab follows whichever account you're acting as. As on Bluesky,
-opening **All** marks that account's notifications as seen on Bluesky itself; the other tabs don't.
+opening **All** marks that account's notifications as seen on Bluesky itself; the other tabs don't. Rows stay tinted
+until you reload the list, so you can see what was new. **Mark all as read** clears the tint and the counts straight
+away, from any tab, here and in the Bluesky app. Notifications stay in the list afterwards, as they do on Bluesky.
 
 ## Keywords tab (phase 2)
 
