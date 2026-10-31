@@ -24,7 +24,7 @@ export const keywordStatus = {
 }
 
 export function listKeywords(): Keyword[] {
-  return db.prepare('SELECT * FROM keywords ORDER BY created_at').all() as Keyword[]
+  return db.prepare('SELECT * FROM keywords ORDER BY COALESCE(position, 1e9), created_at').all() as Keyword[]
 }
 
 const saveHit = db.prepare('INSERT OR IGNORE INTO keyword_hits (keyword_id, uri, sort_at) VALUES (?, ?, ?)')

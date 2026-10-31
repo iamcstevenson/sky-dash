@@ -114,6 +114,15 @@ The tab shows one account at a time, following whichever account you're acting a
 - **Hide people I follow** shows only accounts you don't follow yet.
 - Very common words are capped at the newest 2,000 matches per check (shown as "2,000+").
 
+**Groups** collect related keywords, like a "UK Basketball" group of `wildcats`, `bbn`, `basketball` and `cbb`:
+
+- Click **+ New group**, or drag one loose keyword onto the middle of another. Drag keywords to reorder them or move them between groups, and hold Option to keep one in both. ⚙ on a group or keyword does the same with checkboxes, which also works on phones.
+- Click a group's name to see posts from all its keywords, with each post listed once. Clicking a keyword inside a group narrows that view.
+- A group has its own context rules on top of each keyword's. Set "Kentucky, BBN, Rupp" once and `basketball` narrows to Kentucky within that group. A post must pass both, unless you've marked its account **Always show**.
+- A keyword can be in several groups, each giving it a different meaning. In the overall view, a post shows if it passes at least one of them.
+- Pausing a group or changing its 📡 applies to all its keywords, including where they're also in other groups.
+- Removing a group, or taking a keyword out of one, never deletes the keyword. ✕ on a keyword does.
+
 **Context rules** say what a keyword should mean. Click **⚙** on a keyword:
 
 - **Must mention one of:** a post only shows if it also mentions one of these (Kentucky, BBN, Rupp, ...). Leave it empty to show every match.
@@ -177,7 +186,7 @@ People you don't follow who **regularly** post or reply about your keywords, ran
 - **Reshared by people you follow:** your follows reposted or quoted their on-topic posts.
 - **Followed by your experts:** your "Always show" accounts and your most on-topic follows follow them.
 
-Filter by keyword (paused keywords included, since their history still counts) and by Mostly posts or Mostly replies. Accounts posting dozens of matches a day are marked **high volume**, and ones calling themselves bots or feeds are marked **automated**; both rank lower. Every suggestion shows why it's there.
+Filter by group or keyword (paused ones included, since their history still counts) and by Mostly posts or Mostly replies. Accounts posting dozens of matches a day are marked **high volume**, and ones calling themselves bots or feeds are marked **automated**; both rank lower. Every suggestion shows why it's there.
 
 - **Their posts** opens their last 14 days, even though you don't follow them.
 - **Audition** collects their posts live without following them, and they aren't notified. The Auditioning list shows how many were on-topic, so you can **Follow** or **Drop** them later.

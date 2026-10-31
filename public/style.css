@@ -550,3 +550,33 @@ a.pc-btn:hover { text-decoration: none; border-color: var(--accent); }
 }
 .nf-follower { align-items: center; cursor: default; }
 .nf-following { color: var(--muted); }
+
+/* Keyword groups and drag and drop */
+#kwList { display: block; }
+.kw-group { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; background: var(--bg); }
+.kw-group.selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.kw-group.off .kw-group-name { text-decoration: line-through; opacity: .6; }
+.kw-group-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 6px 8px; cursor: grab; }
+.kw-group-head button { border: 0; background: none; padding: 3px 6px; border-radius: 6px; color: var(--muted); }
+.kw-group-head button:hover { background: var(--surface-2); }
+.kw-group-head button.has-rules { color: var(--accent); }
+.kw-group-head .kw-group-name { color: var(--text); font-weight: 700; font-size: 14px; }
+.kw-group-head .n { color: var(--muted); font-size: 12px; }
+.kw-group-acts { margin-left: auto; display: inline-flex; align-items: center; }
+.kw-group-tags { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 8px 8px; min-height: 30px; }
+.kw-loose { display: flex; flex-wrap: wrap; gap: 6px; min-height: 28px; }
+.kw-loose-label { color: var(--muted); font-size: 12px; font-weight: 600; margin: 8px 2px 4px; }
+.kw-new-group { display: block; margin-top: 8px; font-size: 13px; }
+.kw-chip[draggable] { cursor: grab; }
+.kw-chip.dragging, .kw-group.dragging { opacity: .4; }
+.kw-chip.drop-before { box-shadow: -3px 0 0 var(--accent); }
+.kw-chip.drop-after { box-shadow: 3px 0 0 var(--accent); }
+.kw-chip.drop-merge { outline: 2px dashed var(--accent); outline-offset: 1px; }
+.kw-group.drop-before { box-shadow: 0 -3px 0 var(--accent); }
+.kw-group.drop-after { box-shadow: 0 3px 0 var(--accent); }
+.kw-group.drop-into, .kw-loose.drop-into { outline: 2px dashed var(--accent); outline-offset: 2px; border-radius: 10px; }
+.rules-block input[type=text] {
+  width: 100%; padding: 7px 10px; border-radius: 8px; font: inherit;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text);
+}
+.rules-checks { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }

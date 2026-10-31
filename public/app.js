@@ -9,7 +9,7 @@ const state = {
   view: ['keywords', 'follows', 'trending', 'discover', 'notifications'].includes(safeGet('view')) ? safeGet('view') : 'following',
   author: null, // { did, handle } when the Following tab shows one person's posts
   englishOnly: safeGet('englishOnly') !== '0', // on unless turned off
-  kw: { list: [], selected: new Set(), hideFollowed: false, showHidden: false, hours: 48, polling: false },
+  kw: { list: [], groups: [], group: null, selected: new Set(), hideFollowed: false, showHidden: false, hours: 48, polling: false },
   type: 'all',
   who: 'all',
   cursor: null,
@@ -308,6 +308,7 @@ const VIEWS = {
     query: () => new URLSearchParams({
       type: state.type,
       ids: [...state.kw.selected].join(','),
+      ...(state.kw.group ? { group: state.kw.group } : {}),
       hideFollowed: state.kw.hideFollowed ? '1' : '0',
       ...(state.kw.showHidden ? { show: 'filtered' } : {}),
       ...(state.englishOnly ? { lang: 'en' } : {}),
@@ -465,31 +466,245 @@ document.querySelectorAll('.tab[data-tab]').forEach((t) => t.addEventListener('c
 
 // ---------- keywords ----------
 
+function keywordChip(k, groupId) {
+  const status = k.error
+    ? `<span class="warn" title="${esc(k.error)}">⚠</span>`
+    : k.lastPollMs === 0 && k.enabled ? '<span class="n">searching…</span>'
+    : `<span class="n" title="${k.capped ? 'Very common keyword: only the newest 2,000 matches per check are kept. ' : ''}${k.count.toLocaleString()} shown, ${k.hidden.toLocaleString()} hidden by your context rules (last ${state.kw.hours} hours)">${k.count.toLocaleString()}${k.capped ? '+' : ''}${k.hidden ? `<span class="hid"> · ${k.hidden.toLocaleString()} hidden</span>` : ''}</span>`
+  const selected = state.kw.selected.has(k.id) && state.kw.group === groupId
+  return `<span class="kw-chip ${selected ? 'selected' : ''} ${k.enabled ? '' : 'off'}" data-kw="${k.id}" ${groupId ? `data-group="${groupId}"` : ''} draggable="true">
+    <button class="kw-name" data-kw-act="select" title="${esc(k.query)}: click to show only this keyword. Drag to move it.">${esc(k.query)}</button>${status}
+    <button data-kw-act="rules" class="${k.hasRules ? 'has-rules' : ''}" title="${k.hasRules ? 'Edit' : 'Set'} what “${esc(k.query)}” should mean">⚙</button>
+    <button data-kw-act="toggle" title="${k.enabled ? 'Pause' : 'Resume'} this keyword">${k.enabled ? '❚❚' : '▶'}</button>
+    <button data-kw-act="feed" title="${k.inFeed ? 'Included in' : 'Left out of'} your Bluesky custom feed">${k.inFeed ? '📡' : '<span style="opacity:.35">📡</span>'}</button>
+    ${groupId ? '<button data-kw-act="ungroup" title="Take out of this group (keeps the keyword)">−</button>' : ''}
+    <button data-kw-act="remove" title="Delete this keyword">✕</button></span>`
+}
+
+function collapsedGroups() {
+  try { return new Set(JSON.parse(safeGet('kwCollapsed') ?? '[]')) } catch { return new Set() }
+}
+
 function renderKeywords() {
+  if (kwDrag) return // a refresh mid-drag would pull the tag out from under the mouse
   const el = $('#kwList')
-  if (!state.kw.list.length) {
-    el.innerHTML = '<span class="kw-empty">No keywords yet.</span>'
+  const { list, groups } = state.kw
+  const inAGroup = new Set(groups.flatMap((g) => g.keywordIds))
+  const collapsed = collapsedGroups()
+  const byId = new Map(list.map((k) => [k.id, k]))
+  const groupHtml = groups.map((g) => {
+    const isCollapsed = collapsed.has(g.id)
+    const members = g.keywordIds.map((id) => byId.get(id)).filter(Boolean)
+    return `<section class="kw-group ${state.kw.group === g.id ? 'selected' : ''} ${g.enabled ? '' : 'off'}" data-group-box="${g.id}">
+      <header class="kw-group-head" draggable="true" data-group-head="${g.id}">
+        <button data-grp="collapse" aria-expanded="${!isCollapsed}" title="${isCollapsed ? 'Expand' : 'Collapse'}">${isCollapsed ? '▸' : '▾'}</button>
+        <button class="kw-group-name" data-grp="select" title="Show this group's posts. Drag to reorder groups.">${esc(g.name)}</button>
+        <span class="n" title="${g.count.toLocaleString()} posts shown, ${g.hidden.toLocaleString()} hidden by the rules (last ${state.kw.hours} hours)">${members.length} tag${members.length === 1 ? '' : 's'} · ${g.count.toLocaleString()}${g.hidden ? `<span class="hid"> · ${g.hidden.toLocaleString()} hidden</span>` : ''}</span>
+        <span class="kw-group-acts">
+          <button data-grp="rules" class="${g.hasRules ? 'has-rules' : ''}" title="Edit this group: name, tags and what it should cover">⚙</button>
+          <button data-grp="toggle" title="${g.enabled ? 'Pause' : 'Resume'} every keyword in this group (also where they're in other groups)">${g.enabled ? '❚❚' : '▶'}</button>
+          <button data-grp="feed" title="${g.inFeed ? 'Take this group’s keywords out of' : 'Add this group’s keywords to'} your Bluesky custom feed">${g.inFeed ? '📡' : '<span style="opacity:.35">📡</span>'}</button>
+          <button data-grp="remove" title="Delete this group (keeps its keywords)">✕</button>
+        </span>
+      </header>
+      ${isCollapsed ? '' : `<div class="kw-group-tags" data-drop-group="${g.id}">${members.map((k) => keywordChip(k, g.id)).join('') || '<span class="kw-empty">Drag keywords here, or add them with ⚙.</span>'}</div>`}
+    </section>`
+  }).join('')
+  const loose = list.filter((k) => !inAGroup.has(k.id))
+  const looseHtml = loose.map((k) => keywordChip(k, null)).join('')
+  el.innerHTML = `${groupHtml}
+    ${groups.length && loose.length ? '<div class="kw-loose-label">Not in a group</div>' : ''}
+    <div class="kw-loose" data-drop-loose>${looseHtml}${list.length ? '' : '<span class="kw-empty">No keywords yet.</span>'}</div>
+    ${list.length ? '<button type="button" class="link-btn kw-new-group" data-grp="new">+ New group</button>' : ''}`
+}
+
+async function refreshKeywordView() {
+  await loadKeywords()
+  loadFeed(true)
+}
+
+// Handles clicks on group controls. Returns true when the click was one of them.
+async function handleGroupAction(e) {
+  const btn = e.target.closest('[data-grp]')
+  if (!btn) return false
+  const action = btn.dataset.grp
+  try {
+    if (action === 'new') {
+      const name = prompt('Name this group (for example, UK Basketball):')?.trim()
+      if (!name) return true
+      const { id } = await api('/api/groups/create', { name })
+      await loadKeywords()
+      openRules({ isGroup: true, id, name })
+      return true
+    }
+    const id = Number(btn.closest('[data-group-box]').dataset.groupBox)
+    const g = state.kw.groups.find((x) => x.id === id)
+    switch (action) {
+      case 'collapse': {
+        const c = collapsedGroups()
+        c.has(id) ? c.delete(id) : c.add(id)
+        safeSet('kwCollapsed', JSON.stringify([...c]))
+        renderKeywords()
+        return true
+      }
+      case 'select':
+        state.kw.group = state.kw.group === id ? null : id
+        state.kw.selected.clear()
+        renderKeywords()
+        loadFeed(true)
+        return true
+      case 'rules':
+        openRules({ isGroup: true, id, name: g.name })
+        return true
+      case 'toggle':
+        await api('/api/groups/set', { id, enabled: !g.enabled })
+        break
+      case 'feed':
+        await api('/api/groups/set', { id, inFeed: !g.inFeed })
+        toast(g.inFeed ? `“${g.name}” left out of your Bluesky feed` : `“${g.name}” added to your Bluesky feed`)
+        break
+      case 'remove':
+        if (!confirm(`Delete the group “${g.name}”? Its keywords stay.`)) return true
+        await api('/api/groups/remove', { id })
+        break
+    }
+    await refreshKeywordView()
+  } catch (err) {
+    toast(err.message)
+  }
+  return true
+}
+
+// ---------- drag and drop for keywords and groups ----------
+
+let kwDrag = null // { type: 'kw', id, from } or { type: 'group', id }
+let kwDrop = null // where a drop would land right now
+
+function clearDropMarks() {
+  document.querySelectorAll('#kwList .drop-before, #kwList .drop-after, #kwList .drop-into, #kwList .drop-merge')
+    .forEach((x) => x.classList.remove('drop-before', 'drop-after', 'drop-into', 'drop-merge'))
+  kwDrop = null
+}
+
+function chipIds(container) {
+  return [...container.querySelectorAll(':scope > .kw-chip')].map((c) => Number(c.dataset.kw))
+}
+
+const kwList = $('#kwList')
+kwList.addEventListener('dragstart', (e) => {
+  const head = e.target.closest?.('[data-group-head]')
+  const chip = e.target.closest?.('.kw-chip')
+  if (head) kwDrag = { type: 'group', id: Number(head.dataset.groupHead), el: head.parentElement }
+  else if (chip) kwDrag = { type: 'kw', id: Number(chip.dataset.kw), from: Number(chip.dataset.group) || null, el: chip }
+  else return
+  e.dataTransfer.effectAllowed = 'copyMove'
+  e.dataTransfer.setData('text/plain', '')
+  requestAnimationFrame(() => kwDrag?.el.classList.add('dragging'))
+})
+
+kwList.addEventListener('dragover', (e) => {
+  if (!kwDrag) return
+  clearDropMarks()
+  if (kwDrag.type === 'group') {
+    const box = e.target.closest('[data-group-box]')
+    if (!box || box === kwDrag.el) return
+    const r = box.getBoundingClientRect()
+    const after = e.clientY > r.top + r.height / 2
+    box.classList.add(after ? 'drop-after' : 'drop-before')
+    kwDrop = { box, after }
+    e.preventDefault()
     return
   }
-  el.innerHTML = state.kw.list.map((k) => {
-    const status = k.error
-      ? `<span class="warn" title="${esc(k.error)}">⚠</span>`
-      : k.lastPollMs === 0 && k.enabled ? '<span class="n">searching…</span>'
-      : `<span class="n" title="${k.capped ? 'Very common keyword: only the newest 2,000 matches per check are kept. ' : ''}${k.count.toLocaleString()} shown, ${k.hidden.toLocaleString()} hidden by your context rules (last ${state.kw.hours} hours)">${k.count.toLocaleString()}${k.capped ? '+' : ''}${k.hidden ? `<span class="hid"> · ${k.hidden.toLocaleString()} hidden</span>` : ''}</span>`
-    return `<span class="kw-chip ${state.kw.selected.has(k.id) ? 'selected' : ''} ${k.enabled ? '' : 'off'}" data-kw="${k.id}">
-      <button class="kw-name" data-kw-act="select" title="${esc(k.query)}: click to show only this keyword">${esc(k.query)}</button>${status}
-      <button data-kw-act="rules" class="${k.hasRules ? 'has-rules' : ''}" title="${k.hasRules ? 'Edit' : 'Set'} what “${esc(k.query)}” should mean">⚙</button>
-      <button data-kw-act="toggle" title="${k.enabled ? 'Pause' : 'Resume'} this keyword">${k.enabled ? '❚❚' : '▶'}</button>
-      <button data-kw-act="feed" title="${k.inFeed ? 'Included in' : 'Left out of'} your Bluesky custom feed">${k.inFeed ? '📡' : '<span style="opacity:.35">📡</span>'}</button>
-      <button data-kw-act="remove" title="Remove">✕</button></span>`
-  }).join('')
-}
+  const chip = e.target.closest('.kw-chip')
+  const box = e.target.closest('[data-group-box]')
+  const container = chip?.parentElement ?? box?.querySelector('[data-drop-group]') ?? e.target.closest('[data-drop-loose]')
+  if (!container && !box) return
+  e.preventDefault()
+  // Holding Option copies between groups, since a keyword can be in several
+  e.dataTransfer.dropEffect = e.altKey && kwDrag.from ? 'copy' : 'move'
+  if (chip && chip !== kwDrag.el) {
+    const r = chip.getBoundingClientRect()
+    const x = (e.clientX - r.left) / r.width
+    // The middle of a loose tag makes a new group with it
+    if (!kwDrag.from && !chip.dataset.group && x > 0.3 && x < 0.7) {
+      chip.classList.add('drop-merge')
+      kwDrop = { merge: Number(chip.dataset.kw) }
+      return
+    }
+    chip.classList.add(x > 0.5 ? 'drop-after' : 'drop-before')
+    kwDrop = { container, chip, after: x > 0.5 }
+    return
+  }
+  if (chip) return // over itself
+  ;(box ?? container).classList.add('drop-into')
+  kwDrop = { container, box }
+})
+
+kwList.addEventListener('dragleave', (e) => {
+  if (!kwList.contains(e.relatedTarget)) clearDropMarks()
+})
+
+kwList.addEventListener('drop', async (e) => {
+  if (!kwDrag) return
+  e.preventDefault()
+  const drag = kwDrag
+  const drop = kwDrop
+  const copy = e.altKey
+  kwDrag = null
+  clearDropMarks()
+  if (!drop) return renderKeywords()
+  try {
+    if (drag.type === 'group') {
+      const ids = state.kw.groups.map((g) => g.id).filter((id) => id !== drag.id)
+      const target = Number(drop.box.dataset.groupBox)
+      ids.splice(ids.indexOf(target) + (drop.after ? 1 : 0), 0, drag.id)
+      state.kw.groups.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id))
+      renderKeywords()
+      await api('/api/groups/order', { ids })
+    } else if (drop.merge) {
+      const a = state.kw.list.find((k) => k.id === drop.merge)
+      const b = state.kw.list.find((k) => k.id === drag.id)
+      const name = prompt(`Make a group with “${a.query}” and “${b.query}”? Name it:`)?.trim()
+      if (name) await api('/api/groups/create', { name, keywordIds: [drop.merge, drag.id] })
+    } else {
+      const container = drop.container
+      const to = Number(container?.dataset.dropGroup ?? drop.box?.dataset.groupBox) || null
+      const order = container ? chipIds(container).filter((id) => id !== drag.id) : []
+      if (drop.chip) order.splice(order.indexOf(Number(drop.chip.dataset.kw)) + (drop.after ? 1 : 0), 0, drag.id)
+      else order.push(drag.id)
+      // Show the result right away; saving it recounts every match, which takes a moment
+      const keepInFrom = copy && to
+      const from = state.kw.groups.find((g) => g.id === drag.from)
+      if (from && from.id !== to && !keepInFrom) from.keywordIds = from.keywordIds.filter((id) => id !== drag.id)
+      const toGroup = state.kw.groups.find((g) => g.id === to)
+      if (toGroup) toGroup.keywordIds = order
+      else state.kw.list.sort((a, b) => (order.indexOf(a.id) + 1 || 1e9) - (order.indexOf(b.id) + 1 || 1e9))
+      renderKeywords()
+      if (!to && !drag.from) await api('/api/keywords/order', { ids: order })
+      // Between groups a drag moves the tag, unless Option is held to keep it in both
+      else await api('/api/groups/move', { keywordId: drag.id, from: copy && to ? null : drag.from, to, order })
+      if (copy && to && drag.from && to !== drag.from) toast('Now in both groups')
+    }
+  } catch (err) {
+    toast(err.message)
+  }
+  await refreshKeywordView()
+})
+
+kwList.addEventListener('dragend', () => {
+  if (!kwDrag) return
+  kwDrag = null
+  clearDropMarks()
+  renderKeywords()
+})
 
 async function loadKeywords() {
   try {
     const data = await api('/api/keywords')
     state.kw.list = data.keywords
+    state.kw.groups = data.groups
     state.kw.hours = data.hours
+    if (state.kw.group && !data.groups.some((g) => g.id === state.kw.group)) state.kw.group = null
     const wasPolling = state.kw.polling
     state.kw.polling = data.polling || data.keywords.some((k) => k.enabled && k.lastPollMs === 0)
     for (const id of state.kw.selected) if (!data.keywords.some((k) => k.id === id)) state.kw.selected.delete(id)
@@ -517,6 +732,7 @@ $('#kwForm').addEventListener('submit', async (e) => {
 })
 
 $('#kwList').addEventListener('click', async (e) => {
+  if (await handleGroupAction(e)) return
   const btn = e.target.closest('[data-kw-act]')
   if (!btn) return
   const id = Number(btn.closest('[data-kw]').dataset.kw)
@@ -524,9 +740,21 @@ $('#kwList').addEventListener('click', async (e) => {
   try {
     switch (btn.dataset.kwAct) {
       case 'select':
-        state.kw.selected.has(id) ? state.kw.selected.delete(id) : state.kw.selected.add(id)
+        {
+          // Picking a tag inside a group narrows that group's view; outside one, it uses the tag alone
+          const groupId = Number(btn.closest('[data-kw]').dataset.group) || null
+          if (state.kw.group !== groupId) {
+            state.kw.group = groupId
+            state.kw.selected.clear()
+          }
+          state.kw.selected.has(id) ? state.kw.selected.delete(id) : state.kw.selected.add(id)
+        }
         renderKeywords()
         return loadFeed(true)
+      case 'ungroup':
+        await api('/api/groups/move', { keywordId: id, from: btn.closest('[data-kw]').dataset.group })
+        toast(`Took “${k.query}” out of the group`)
+        break
       case 'toggle':
         await api('/api/keywords/update', { id, enabled: !k.enabled })
         break
@@ -564,9 +792,14 @@ function renderVerdicts(item) {
     .map((v) => {
       const k = state.kw.list.find((x) => x.id === v.id)
       if (!k) return ''
+      // In a group view, or when a group's rules hid the post, the button applies to that group
+      const groupId = state.kw.group || (!v.kept && v.groupId) || null
+      const groupName = groupId ? state.kw.groups.find((g) => g.id === groupId)?.name : null
+      const scope = groupName ?? k.query
+      const attrs = `data-kw-id="${k.id}" ${groupId ? `data-group-id="${groupId}"` : ''} data-scope="${esc(scope)}" data-did="${esc(did)}" data-handle="${esc(handle)}"`
       const btn = v.kept
-        ? `<button class="link-btn bad" data-kwauthor="blocked" data-kw-id="${k.id}" data-did="${esc(did)}" data-handle="${esc(handle)}" title="Hide posts by @${esc(handle)} from “${esc(k.query)}”">Not about ${esc(k.query)}? Never show @${esc(handle)}</button>`
-        : `<button class="link-btn" data-kwauthor="trusted" data-kw-id="${k.id}" data-did="${esc(did)}" data-handle="${esc(handle)}" title="Always show posts by @${esc(handle)} for “${esc(k.query)}”">Always show @${esc(handle)} here</button>`
+        ? `<button class="link-btn bad" data-kwauthor="blocked" ${attrs} title="Hide posts by @${esc(handle)} from “${esc(scope)}”">Not about ${esc(scope)}? Never show @${esc(handle)}</button>`
+        : `<button class="link-btn" data-kwauthor="trusted" ${attrs} title="Always show posts by @${esc(handle)} for “${esc(scope)}”">Always show @${esc(handle)} here</button>`
       return `<div class="kw-verdict"><span class="kw-tag ${v.kept ? '' : 'hidden-tag'}">${esc(k.query)}</span>
         <span class="why">${v.kept ? '' : 'Hidden: '}${esc(v.reason)}</span>${btn}</div>`
     })
@@ -577,16 +810,18 @@ function renderVerdicts(item) {
 document.addEventListener('click', async (e) => {
   const b = e.target.closest('[data-kwauthor]')
   if (!b) return
-  const id = Number(b.dataset.kwId)
-  const k = state.kw.list.find((x) => x.id === id)
+  const groupId = Number(b.dataset.groupId) || null
+  const id = groupId ?? Number(b.dataset.kwId)
+  const url = groupId ? '/api/groups/author' : '/api/keywords/author'
+  const scope = b.dataset.scope
   const verdict = b.dataset.kwauthor
   b.disabled = true
   try {
-    await api('/api/keywords/author', { id, did: b.dataset.did, verdict })
-    toast(verdict === 'trusted' ? `Always showing @${b.dataset.handle} for “${k.query}”` : `Hiding @${b.dataset.handle} from “${k.query}”`, {
+    await api(url, { id, did: b.dataset.did, verdict })
+    toast(verdict === 'trusted' ? `Always showing @${b.dataset.handle} for “${scope}”` : `Hiding @${b.dataset.handle} from “${scope}”`, {
       label: 'Undo',
       run: async () => {
-        await api('/api/keywords/author', { id, did: b.dataset.did, verdict: null })
+        await api(url, { id, did: b.dataset.did, verdict: null })
         await loadKeywords()
         loadFeed(true)
       },
@@ -607,12 +842,14 @@ $('#showHidden').addEventListener('change', (e) => {
 async function openRules(k) {
   const dlg = $('#actionDialog')
   const body = $('#adBody')
-  $('#adTitle').textContent = `What should “${k.query}” mean?`
+  const label = k.isGroup ? k.name : k.query
+  const base = k.isGroup ? '/api/groups' : '/api/keywords'
+  $('#adTitle').textContent = k.isGroup ? `Edit group “${label}”` : `What should “${label}” mean?`
   body.innerHTML = '<div class="dim">Loading…</div>'
   dlg.showModal()
   let r
   try {
-    r = await api(`/api/keywords/rules?id=${k.id}`)
+    r = await api(`${base}/rules?id=${k.id}`)
   } catch (err) {
     body.innerHTML = `<div class="error">${esc(err.message)}</div>`
     return
@@ -625,8 +862,21 @@ async function openRules(k) {
         <div class="people">${r.suggested.map((p) => `<span class="person"><span data-profile="${esc(p.did)}">@${esc(p.handle)}</span> <span class="dim">(${p.kept})</span>
           <button class="link-btn" data-rule-trust="${esc(p.did)}">Always show</button></span>`).join('')}</div></div>`
     : ''
+  const checks = (items, checked, name) => `<div class="rules-checks">${items.map((x) => `<label class="chip"><input type="checkbox" name="${name}" value="${x.id}" ${checked.includes(x.id) ? 'checked' : ''}> ${esc(x.label)}</label>`).join('')}</div>`
+  const groupBits = k.isGroup
+    ? `<label class="rules-block"><b>Group name</b><input id="groupName" type="text" maxlength="60" value="${esc(r.name)}"></label>
+       <div class="rules-block"><b>Keywords in this group</b><small>A keyword can be in several groups. Unticking one keeps the keyword.</small>
+         ${checks(state.kw.list.map((x) => ({ id: x.id, label: x.query })), r.keywordIds, 'member')}</div>`
+    : ''
+  const memberOf = !k.isGroup && state.kw.groups.length
+    ? `<div class="rules-block"><b>Groups</b><small>A keyword can be in several, each with its own rules.</small>
+         ${checks(state.kw.groups.map((g) => ({ id: g.id, label: g.name })), r.groupIds, 'group')}</div>`
+    : ''
   body.innerHTML = `
-    <p class="dim rules-intro">Posts matching “${esc(k.query)}” are shown only if they mention one of the first list and none of the second.
+    ${groupBits}
+    <p class="dim rules-intro">${k.isGroup
+      ? 'These rules apply to every keyword in the group, on top of each keyword’s own rules.'
+      : `Posts matching “${esc(label)}” are shown only if they mention one of the first list and none of the second.`}
       Separate words with commas or new lines. Words in ALL CAPS (like UK or SEC) must match exactly; others ignore case.</p>
     <label class="rules-block"><b>Must mention one of</b><small>Leave empty to keep every match</small>
       <textarea id="rulesMust" rows="4">${esc(r.must.join(', '))}</textarea></label>
@@ -635,28 +885,34 @@ async function openRules(k) {
     <div class="rules-block"><b>Always show these accounts</b><div class="people">${people(r.trusted, 'trusted')}</div></div>
     <div class="rules-block"><b>Never show these accounts</b><div class="people">${people(r.blocked, 'blocked')}</div></div>
     ${suggested}
+    ${memberOf}
     <div class="ad-foot"><button class="secondary" data-close>Cancel</button><button class="primary" id="rulesSave">Save</button></div>`
 
-  const refresh = async () => {
-    await loadKeywords()
-    loadFeed(true)
-  }
   body.querySelectorAll('[data-rule-person]').forEach((x) => (x.onclick = async () => {
-    await api('/api/keywords/author', { id: k.id, did: x.dataset.rulePerson, verdict: null })
+    await api(`${base}/author`, { id: k.id, did: x.dataset.rulePerson, verdict: null })
     x.closest('.person').remove()
-    refresh()
+    refreshKeywordView()
   }))
   body.querySelectorAll('[data-rule-trust]').forEach((x) => (x.onclick = async () => {
-    await api('/api/keywords/author', { id: k.id, did: x.dataset.ruleTrust, verdict: 'trusted' })
+    await api(`${base}/author`, { id: k.id, did: x.dataset.ruleTrust, verdict: 'trusted' })
     x.replaceWith(Object.assign(document.createElement('span'), { className: 'dim', textContent: 'added' }))
-    refresh()
+    refreshKeywordView()
   }))
+  const ticked = (name) => [...body.querySelectorAll(`input[name="${name}"]:checked`)].map((i) => Number(i.value))
   $('#rulesSave').onclick = async () => {
     try {
-      await api('/api/keywords/rules', { id: k.id, must: $('#rulesMust').value, exclude: $('#rulesExclude').value })
+      const rules = { id: k.id, must: $('#rulesMust').value, exclude: $('#rulesExclude').value }
+      if (k.isGroup) {
+        // Keep the group's existing order; newly ticked keywords go at the end
+        const picked = ticked('member')
+        const keywordIds = [...r.keywordIds.filter((id) => picked.includes(id)), ...picked.filter((id) => !r.keywordIds.includes(id))]
+        await api('/api/groups/update', { ...rules, name: $('#groupName').value, keywordIds })
+      } else {
+        await api('/api/keywords/rules', { ...rules, ...(state.kw.groups.length ? { groupIds: ticked('group') } : {}) })
+      }
       dlg.close()
-      toast(`Saved rules for “${k.query}”`)
-      refresh()
+      toast(`Saved “${k.isGroup ? $('#groupName').value.trim() : label}”`)
+      refreshKeywordView()
     } catch (err) {
       toast(err.message)
     }
@@ -867,7 +1123,7 @@ for (const [id, key] of [['#trHours', 'hours'], ['#trWho', 'who']]) {
 
 // ---------- discover ----------
 
-const dv = { kw: 0, mode: 'all', data: null, shown: 30 }
+const dv = { pick: '0', mode: 'all', data: null, shown: 30 } // pick: '0' all, '12' a keyword, 'g3' a group
 
 async function loadDiscover() {
   // Keywords list feeds the keyword switcher
@@ -875,17 +1131,25 @@ async function loadDiscover() {
     try {
       const k = await api('/api/keywords')
       state.kw.list = k.keywords
+      state.kw.groups = k.groups
     } catch {}
   }
   // Paused keywords still have their recent history, so they're useful for finding people too
   const kws = state.kw.list
-  if (dv.kw && !kws.some((k) => k.id === dv.kw)) dv.kw = 0
-  $('#dvKeyword').innerHTML = [['0', 'All keywords', true], ...kws.map((k) => [String(k.id), k.query, k.enabled])]
-    .map(([v, l, on]) => `<button data-value="${v}" class="${String(dv.kw) === v ? 'on' : ''} ${on ? '' : 'paused'}" title="${on ? '' : 'Paused keyword (still has recent history)'}">${esc(l)}</button>`).join('')
+  const groups = state.kw.groups
+  const known = dv.pick === '0' || (dv.pick.startsWith('g') ? groups.some((g) => `g${g.id}` === dv.pick) : kws.some((k) => String(k.id) === dv.pick))
+  if (!known) dv.pick = '0'
+  $('#dvKeyword').innerHTML = [
+    ['0', 'All keywords', true],
+    ...groups.map((g) => [`g${g.id}`, `📁 ${g.name}`, g.enabled]),
+    ...kws.map((k) => [String(k.id), k.query, k.enabled]),
+  ]
+    .map(([v, l, on]) => `<button data-value="${v}" class="${dv.pick === v ? 'on' : ''} ${on ? '' : 'paused'}" title="${on ? '' : 'Paused (still has recent history)'}">${esc(l)}</button>`).join('')
   document.querySelectorAll('#dvMode button').forEach((b) => b.classList.toggle('on', b.dataset.value === dv.mode))
   $('#dvList').innerHTML = '<div class="feed-end">Ranking…</div>'
   try {
-    dv.data = await api(`/api/discover?mode=${dv.mode}${dv.kw ? `&kw=${dv.kw}` : ''}`)
+    const scope = dv.pick === '0' ? '' : dv.pick.startsWith('g') ? `&group=${dv.pick.slice(1)}` : `&kw=${dv.pick}`
+    dv.data = await api(`/api/discover?mode=${dv.mode}${scope}`)
     renderDiscover()
   } catch (err) {
     $('#dvList').innerHTML = `<div class="feed-end">Couldn't rank accounts: ${esc(err.message)}</div>`
@@ -956,7 +1220,7 @@ function renderDiscover() {
 $('#dvKeyword').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-value]')
   if (!b) return
-  dv.kw = Number(b.dataset.value)
+  dv.pick = b.dataset.value
   dv.shown = 30
   loadDiscover()
 })

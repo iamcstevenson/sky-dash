@@ -64,27 +64,28 @@ const talliesCache = new Map<string, { at: number; tallies: Map<string, Tally>; 
 export function clearDiscoverCache() {
   talliesCache.clear()
 }
-function topicTallies(kw: number | null, keptUris?: Set<string>): Map<string, Tally> {
-  const key = String(kw ?? 'all')
+function topicTallies(kw: number | null, keptUris?: Set<string>, group: number | null = null): Map<string, Tally> {
+  const key = group ? `g${group}` : String(kw ?? 'all')
   const hit = talliesCache.get(key)
   if (hit && Date.now() - hit.at < 60_000) {
     if (keptUris) for (const u of hit.kept) keptUris.add(u)
     return hit.tallies
   }
   const kept = new Set<string>()
-  const tallies = computeTallies(kw, kept)
+  const tallies = computeTallies(kw, kept, group)
   talliesCache.set(key, { at: Date.now(), tallies, kept })
   if (keptUris) for (const u of kept) keptUris.add(u)
   return tallies
 }
 
-function computeTallies(kw: number | null, keptUris?: Set<string>): Map<string, Tally> {
+function computeTallies(kw: number | null, keptUris?: Set<string>, group: number | null = null): Map<string, Tally> {
   const since = Date.now() - DAYS * DAY
+  const members = group ? `AND h.keyword_id IN (SELECT keyword_id FROM keyword_group_members WHERE group_id = ${Number(group)})` : ''
   const rows = db
     .prepare(
       `SELECT p.uri, p.author_did, p.sort_at, p.reply_parent, p.record, GROUP_CONCAT(h.keyword_id) kws
        FROM keyword_hits h JOIN posts p ON p.uri = h.uri
-       WHERE h.sort_at > ? ${kw ? 'AND h.keyword_id = ?' : ''} GROUP BY p.uri`,
+       WHERE h.sort_at > ? ${kw ? 'AND h.keyword_id = ?' : ''} ${members} GROUP BY p.uri`,
     )
     .all(...(kw ? [since, kw] : [since])) as {
     uri: string
@@ -96,7 +97,7 @@ function computeTallies(kw: number | null, keptUris?: Set<string>): Map<string, 
   }[]
   const out = new Map<string, Tally>()
   for (const r of rows) {
-    const { kept } = judgeRow(r)
+    const { kept } = judgeRow(r, group)
     if (!kept.length) continue
     keptUris?.add(r.uri)
     let t = out.get(r.author_did)
@@ -111,34 +112,42 @@ function computeTallies(kw: number | null, keptUris?: Set<string>): Map<string, 
 }
 
 // Experts: accounts you marked "always show", plus the followed accounts that post most on-topic
-export function expertDids(kw: number | null = null): string[] {
-  const trusted = (
-    db.prepare(`SELECT DISTINCT author_did FROM keyword_authors WHERE verdict = 'trusted' ${kw ? 'AND keyword_id = ?' : ''}`).all(
-      ...(kw ? [kw] : []),
-    ) as { author_did: string }[]
-  ).map((r) => r.author_did)
+export function expertDids(kw: number | null = null, group: number | null = null): string[] {
+  const trusted = marked('trusted', kw, group)
   const followed = followedSet()
-  const topFollowed = [...topicTallies(kw).values()]
+  const topFollowed = [...topicTallies(kw, undefined, group).values()]
     .filter((t) => followed.has(t.did) && t.days.size >= 2)
     .sort((a, b) => b.days.size - a.days.size || b.onTopic - a.onTopic)
     .map((t) => t.did)
   return [...new Set([...trusted, ...topFollowed])].slice(0, MAX_EXPERTS)
 }
 
-export function discover(kw: number | null, mode: string) {
+// Accounts marked always or never show, for one keyword, one group and its keywords, or everything
+function marked(verdict: 'trusted' | 'blocked', kw: number | null, group: number | null): string[] {
+  const rows = group
+    ? db
+        .prepare(
+          `SELECT author_did FROM group_authors WHERE verdict = ? AND group_id = ?
+           UNION SELECT author_did FROM keyword_authors WHERE verdict = ?
+             AND keyword_id IN (SELECT keyword_id FROM keyword_group_members WHERE group_id = ?)`,
+        )
+        .all(verdict, group, verdict, group)
+    : kw
+      ? db.prepare('SELECT DISTINCT author_did FROM keyword_authors WHERE verdict = ? AND keyword_id = ?').all(verdict, kw)
+      : db.prepare('SELECT author_did FROM keyword_authors WHERE verdict = ? UNION SELECT author_did FROM group_authors WHERE verdict = ?').all(verdict, verdict)
+  return (rows as { author_did: string }[]).map((r) => r.author_did)
+}
+
+export function discover(kw: number | null, mode: string, group: number | null = null) {
   const followed = followedSet()
   const own = new Set(ownDids())
   const dismissed = new Set((db.prepare('SELECT did FROM discover_dismissed').all() as { did: string }[]).map((r) => r.did))
   const auditioning = new Set(auditionDids())
-  const blockedForKw = new Set(
-    (db.prepare(`SELECT author_did FROM keyword_authors WHERE verdict = 'blocked' ${kw ? 'AND keyword_id = ?' : ''}`).all(
-      ...(kw ? [kw] : []),
-    ) as { author_did: string }[]).map((r) => r.author_did),
-  )
+  const blockedForKw = new Set(marked('blocked', kw, group))
   const skip = (did: string) => followed.has(did) || own.has(did) || dismissed.has(did) || auditioning.has(did) || blockedForKw.has(did)
 
   const onTopicUris = new Set<string>()
-  const tallies = topicTallies(kw, onTopicUris)
+  const tallies = topicTallies(kw, onTopicUris, group)
   const since = Date.now() - DAYS * DAY
 
   // Reshared by people you follow (reposts and quotes), counted by distinct follower
@@ -166,7 +175,7 @@ export function discover(kw: number | null, mode: string) {
   }
 
   // Followed by your experts
-  const experts = expertDids(kw)
+  const experts = expertDids(kw, group)
   const expertFollows = new Map<string, number>()
   if (experts.length) {
     for (const r of db

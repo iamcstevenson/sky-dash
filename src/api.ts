@@ -10,7 +10,8 @@ import { followStats, unfollow, follow, mute, lists, createList, addToList, prof
 import { notifStatus } from './notifications.ts'
 import { trending, postsForTopic } from './trending.ts'
 import { isEnglish } from './lang.ts'
-import { judgeRow, judge, rulesFor, saveRules, setAuthor, suggestedAuthors, searchText, type Verdict } from './rules.ts'
+import { judgeRow, judge, rulesFor, groupRulesFor, saveRules, setAuthor, suggestedAuthors, suggestedForGroup, searchText, type Verdict } from './rules.ts'
+import { listGroups, memberIds, createGroup, removeGroup, updateGroup, setGroupAuthor, setKeywordGroups, moveKeyword, orderKeywords, orderGroups, groupHasRules } from './groups.ts'
 import { discover, dismiss, audition, auditionList, refreshDiscover, discoverStatus, clearDiscoverCache } from './discover.ts'
 import { uploadLimits, jobStatus, videoEmbed } from './video.ts'
 import { groupedNotifications, unreadCounts, markSeen, profilesFor, recentChats, searchPeople, sendPostViaChat } from './notifs.ts'
@@ -73,9 +74,14 @@ function keywordFilter(q: Query) {
   const params: (string | number)[] = [Date.now() - config.keywordHours * 3_600_000]
   if (q.get('lang') === 'en') where.push('p.is_en = 1')
   const ids = (q.get('ids') ?? '').split(',').map(Number).filter((n) => n > 0)
-  if (ids.length) {
-    where.push(`h.keyword_id IN (${ids.map(() => '?').join(',')})`)
-    params.push(...ids)
+  const group = Number(q.get('group')) || null
+  // Viewing a group means its keywords (or the ones picked within it)
+  const members = group ? memberIds(group) : null
+  const wanted = members ? (ids.length ? ids.filter((i) => members.includes(i)) : members) : ids
+  if (members && !wanted.length) where.push('1 = 0')
+  if (wanted.length) {
+    where.push(`h.keyword_id IN (${wanted.map(() => '?').join(',')})`)
+    params.push(...wanted)
   }
   const type = q.get('type')
   if (type === 'posts') where.push('p.reply_parent IS NULL')
@@ -149,23 +155,56 @@ const BATCH = 400
 const MAX_SCAN = 4000
 
 // Kept / hidden counts per keyword for the chips, cached briefly since the page refreshes them often
-let countsCache: { at: number; value: Map<number, { kept: number; hidden: number }> } | null = null
+type Counts = { kept: number; hidden: number }
+let countsCache: { at: number; value: Map<number, Counts>; groups: Map<number, Counts> } | null = null
 function keywordCounts() {
-  if (countsCache && Date.now() - countsCache.at < 30_000) return countsCache.value
+  if (countsCache && Date.now() - countsCache.at < 30_000) return countsCache
   const rows = db
     .prepare(
       `SELECT h.keyword_id, p.uri, p.author_did, p.record FROM keyword_hits h JOIN posts p ON p.uri = h.uri
        WHERE h.sort_at > ?`,
     )
     .all(Date.now() - config.keywordHours * 3_600_000) as { keyword_id: number; uri: string; author_did: string; record: string | null }[]
-  const value = new Map<number, { kept: number; hidden: number }>()
+  const value = new Map<number, Counts>()
+  // A post counts once per group, however many of the group's keywords it matched
+  const groupList = listGroups()
+  const postsInGroup = new Map<number, Map<string, boolean>>(groupList.map((g) => [g.id, new Map()]))
+  const groupsOfKeyword = new Map<number, number[]>()
+  for (const g of groupList) for (const k of g.keywordIds) groupsOfKeyword.set(k, [...(groupsOfKeyword.get(k) ?? []), g.id])
   for (const r of rows) {
+    const text = searchText(r.uri, r.record)
     const c = value.get(r.keyword_id) ?? { kept: 0, hidden: 0 }
-    judge(r.keyword_id, r.author_did, searchText(r.uri, r.record)).kept ? c.kept++ : c.hidden++
+    judge(r.keyword_id, r.author_did, text).kept ? c.kept++ : c.hidden++
     value.set(r.keyword_id, c)
+    for (const g of groupsOfKeyword.get(r.keyword_id) ?? []) {
+      const posts = postsInGroup.get(g)!
+      posts.set(r.uri, posts.get(r.uri) || judge(r.keyword_id, r.author_did, text, g).kept)
+    }
   }
-  countsCache = { at: Date.now(), value }
-  return value
+  const groups = new Map<number, Counts>()
+  for (const [g, posts] of postsInGroup) {
+    const kept = [...posts.values()].filter(Boolean).length
+    groups.set(g, { kept, hidden: posts.size - kept })
+  }
+  countsCache = { at: Date.now(), value, groups }
+  return countsCache
+}
+
+function resetKeywordCaches() {
+  countsCache = null
+  clearDiscoverCache()
+}
+
+// Names for a list of accounts, for the rules panels
+function handlesFor(dids: string[]) {
+  if (!dids.length) return []
+  const rows = db.prepare(`SELECT did, handle, display_name FROM profiles WHERE did IN (${dids.map(() => '?').join(',')})`).all(...dids) as {
+    did: string
+    handle: string | null
+    display_name: string | null
+  }[]
+  const byDid = new Map(rows.map((x) => [x.did, x]))
+  return dids.map((did) => ({ did, handle: byDid.get(did)?.handle ?? did, name: byDid.get(did)?.display_name ?? null }))
 }
 
 function feedgenInfo() {
@@ -301,7 +340,8 @@ const routes: Record<string, Handler> = {
 
   'GET /api/discover': async (q) => {
     const kw = Number(q.get('kw')) || null
-    return { ...discover(kw, q.get('mode') ?? 'all'), auditions: auditionList() }
+    const group = Number(q.get('group')) || null
+    return { ...discover(kw, q.get('mode') ?? 'all', group), auditions: auditionList() }
   },
   'POST /api/discover/dismiss': async (_q, b) => {
     dismiss(String(b.did), !!b.undo)
@@ -320,15 +360,29 @@ const routes: Record<string, Handler> = {
 
   'GET /api/keywords': async () => {
     const counts = keywordCounts()
+    const all = listKeywords()
     return {
-      keywords: listKeywords().map((k) => ({
+      groups: listGroups().map((g) => {
+        const members = all.filter((k) => g.keywordIds.includes(k.id))
+        return {
+          id: g.id,
+          name: g.name,
+          keywordIds: g.keywordIds,
+          count: counts.groups.get(g.id)?.kept ?? 0,
+          hidden: counts.groups.get(g.id)?.hidden ?? 0,
+          hasRules: groupHasRules(g.id),
+          enabled: members.some((k) => k.enabled),
+          inFeed: members.some((k) => k.in_feed),
+        }
+      }),
+      keywords: all.map((k) => ({
         id: k.id,
         query: k.query,
         enabled: !!k.enabled,
         inFeed: !!k.in_feed,
         lastPollMs: k.last_poll_ms,
-        count: counts.get(k.id)?.kept ?? 0,
-        hidden: counts.get(k.id)?.hidden ?? 0,
+        count: counts.value.get(k.id)?.kept ?? 0,
+        hidden: counts.value.get(k.id)?.hidden ?? 0,
         hasRules: (() => {
           const r = rulesFor(k.id)
           return r.must.length + r.exclude.length + r.trusted.size + r.blocked.size > 0
@@ -363,31 +417,84 @@ const routes: Record<string, Handler> = {
   'GET /api/keywords/rules': async (q) => {
     const id = Number(q.get('id'))
     const r = rulesFor(id)
-    const handles = (dids: string[]) => {
-      if (!dids.length) return []
-      const rows = db.prepare(`SELECT did, handle, display_name FROM profiles WHERE did IN (${dids.map(() => '?').join(',')})`).all(...dids) as {
-        did: string
-        handle: string | null
-        display_name: string | null
-      }[]
-      const byDid = new Map(rows.map((x) => [x.did, x]))
-      return dids.map((did) => ({ did, handle: byDid.get(did)?.handle ?? did, name: byDid.get(did)?.display_name ?? null }))
-    }
     const suggested = suggestedAuthors(id, Date.now() - config.keywordHours * 3_600_000)
-    const sugg = handles(suggested.map((x) => x.did))
+    const sugg = handlesFor(suggested.map((x) => x.did))
     return {
       must: r.must,
       exclude: r.exclude,
-      trusted: handles([...r.trusted]),
-      blocked: handles([...r.blocked]),
+      trusted: handlesFor([...r.trusted]),
+      blocked: handlesFor([...r.blocked]),
       suggested: suggested.map((x, i) => ({ ...sugg[i], kept: x.kept })),
+      groupIds: listGroups().filter((g) => g.keywordIds.includes(id)).map((g) => g.id),
     }
   },
 
   'POST /api/keywords/rules': async (_q, b) => {
     saveRules(Number(b.id), b.must, b.exclude)
-    countsCache = null
-    clearDiscoverCache()
+    if (Array.isArray(b.groupIds)) setKeywordGroups(Number(b.id), b.groupIds.map(Number))
+    resetKeywordCaches()
+    return { ok: true }
+  },
+
+  // ---------- keyword groups ----------
+
+  'POST /api/groups/create': async (_q, b) => {
+    const res = createGroup(b.name, Array.isArray(b.keywordIds) ? b.keywordIds.map(Number) : [])
+    resetKeywordCaches()
+    return res
+  },
+  'GET /api/groups/rules': async (q) => {
+    const id = Number(q.get('id'))
+    const r = groupRulesFor(id)
+    const suggested = suggestedForGroup(id, Date.now() - config.keywordHours * 3_600_000)
+    const sugg = handlesFor(suggested.map((x) => x.did))
+    return {
+      name: r.name,
+      must: r.must,
+      exclude: r.exclude,
+      trusted: handlesFor([...r.trusted]),
+      blocked: handlesFor([...r.blocked]),
+      suggested: suggested.map((x, i) => ({ ...sugg[i], kept: x.kept })),
+      keywordIds: memberIds(id),
+    }
+  },
+  'POST /api/groups/update': async (_q, b) => {
+    updateGroup(Number(b.id), b)
+    resetKeywordCaches()
+    return { ok: true }
+  },
+  'POST /api/groups/remove': async (_q, b) => {
+    removeGroup(Number(b.id))
+    resetKeywordCaches()
+    return { ok: true }
+  },
+  // Pauses or resumes every keyword in a group, or adds or removes them all from the custom feed
+  'POST /api/groups/set': async (_q, b) => {
+    const ids = memberIds(Number(b.id))
+    for (const id of ids) {
+      if (typeof b.enabled === 'boolean') db.prepare('UPDATE keywords SET enabled = ? WHERE id = ?').run(b.enabled ? 1 : 0, id)
+      if (typeof b.inFeed === 'boolean') db.prepare('UPDATE keywords SET in_feed = ? WHERE id = ?').run(b.inFeed ? 1 : 0, id)
+      if (b.enabled === true) pollKeywords(id).catch(() => {})
+    }
+    return { ok: true }
+  },
+  'POST /api/groups/author': async (_q, b) => {
+    const verdict = b.verdict === 'trusted' || b.verdict === 'blocked' ? b.verdict : null
+    setGroupAuthor(Number(b.id), String(b.did), verdict)
+    resetKeywordCaches()
+    return { ok: true }
+  },
+  'POST /api/groups/move': async (_q, b) => {
+    moveKeyword(b)
+    resetKeywordCaches()
+    return { ok: true }
+  },
+  'POST /api/groups/order': async (_q, b) => {
+    orderGroups((b.ids ?? []).map(Number))
+    return { ok: true }
+  },
+  'POST /api/keywords/order': async (_q, b) => {
+    orderKeywords((b.ids ?? []).map(Number))
     return { ok: true }
   },
 
@@ -395,13 +502,13 @@ const routes: Record<string, Handler> = {
   'POST /api/keywords/author': async (_q, b) => {
     const verdict = b.verdict === 'trusted' || b.verdict === 'blocked' ? b.verdict : null
     setAuthor(Number(b.id), String(b.did), verdict)
-    countsCache = null
-    clearDiscoverCache()
+    resetKeywordCaches()
     return { ok: true }
   },
 
   'POST /api/keywords/remove': async (_q, b) => {
     removeKeyword(Number(b.id))
+    resetKeywordCaches()
     return { ok: true }
   },
 
@@ -409,6 +516,7 @@ const routes: Record<string, Handler> = {
   'GET /api/keywords/feed': async (q) => {
     const limit = Math.min(Number(q.get('limit')) || 30, 60)
     const wantHidden = q.get('show') === 'filtered'
+    const group = Number(q.get('group')) || null
     const picked: FeedRow[] = []
     let before = Number(q.get('before')) || Infinity
     let scanned = 0
@@ -428,7 +536,7 @@ const routes: Record<string, Handler> = {
         )
         .all(...params, BATCH) as (FeedRow & { record: string | null })[]
       for (const row of batch) {
-        const { verdicts, kept } = judgeRow(row)
+        const { verdicts, kept } = judgeRow(row, group)
         if (kept.length > 0 === !wantHidden) {
           picked.push({ ...row, kws: wantHidden ? row.kws : kept.join(','), verdicts })
           if (picked.length >= limit + 10) break
@@ -459,7 +567,8 @@ const routes: Record<string, Handler> = {
       )
       .all(...params) as { uri: string; author_did: string; record: string | null; kws: string | null }[]
     const wantHidden = q.get('show') === 'filtered'
-    return { count: rows.filter((r) => judgeRow(r).kept.length > 0 === !wantHidden).length }
+    const group = Number(q.get('group')) || null
+    return { count: rows.filter((r) => judgeRow(r, group).kept.length > 0 === !wantHidden).length }
   },
 
   // ---------- custom Bluesky feed ----------

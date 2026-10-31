@@ -88,7 +88,10 @@ const server = createServer(async (req, res) => {
     }
     send(res, 200, await handleApi(req.method ?? 'GET', url, body))
   } catch (err: any) {
-    const status = err instanceof HttpError ? err.status : (err?.status ?? 500)
+    // Network failures reach here with a status of 1 (the Bluesky library's "unknown"), which isn't a real
+    // HTTP code and would crash the server if sent, so anything out of range is reported as a bad gateway
+    const raw = err instanceof HttpError ? err.status : (err?.status ?? 500)
+    const status = raw >= 400 && raw <= 599 ? raw : 502
     if (status >= 500) console.error(err)
     send(res, status, { error: err?.message ?? String(err) })
   }
