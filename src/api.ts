@@ -15,6 +15,7 @@ import { listGroups, memberIds, createGroup, removeGroup, updateGroup, setGroupA
 import { discover, dismiss, audition, auditionList, refreshDiscover, discoverStatus, clearDiscoverCache } from './discover.ts'
 import { uploadLimits, jobStatus, videoEmbed } from './video.ts'
 import { groupedNotifications, unreadCounts, markSeen, profilesFor, recentChats, searchPeople, sendPostViaChat } from './notifs.ts'
+import { syncState, syncDay } from './sync.ts'
 
 type Query = URLSearchParams
 type Handler = (q: Query, body: any) => Promise<unknown>
@@ -229,6 +230,13 @@ const routes: Record<string, Handler> = {
     storedPosts: (db.prepare('SELECT COUNT(*) n FROM posts').get() as { n: number }).n,
     feedHours: config.feedHours,
   }),
+
+  'GET /api/sync/state': async () => syncState(),
+  'GET /api/sync/export': async (q) => {
+    const day = syncDay(q.get('day') ?? '')
+    if (!day) throw new HttpError(400, 'day must look like 2026-11-01')
+    return day
+  },
 
   'GET /api/feed': async (q) => {
     const limit = Math.min(Number(q.get('limit')) || 30, 60)
