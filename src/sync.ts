@@ -66,6 +66,25 @@ type DayRow = {
   followed: number
 }
 
+// Bluesky shortens long addresses in the text and keeps the full one in a link facet. Offsets count UTF-8 bytes.
+function linksIn(record: string | null) {
+  if (!record) return undefined
+  try {
+    const facets = JSON.parse(record).facets
+    if (!Array.isArray(facets)) return undefined
+    const links = []
+    for (const f of facets) {
+      const start = f?.index?.byteStart
+      const end = f?.index?.byteEnd
+      const link = (f?.features ?? []).find((x: any) => x?.$type === 'app.bsky.richtext.facet#link' && typeof x.uri === 'string')
+      if (link && Number.isInteger(start) && Number.isInteger(end) && end > start) links.push({ start, end, uri: link.uri })
+    }
+    return links.length ? links : undefined
+  } catch {
+    return undefined
+  }
+}
+
 // One UTC day of what the phone shows: posts from people you follow, keyword matches your rules keep,
 // and your own posts, so a reply sent from the phone shows up in its thread
 export function syncDay(day: string) {
@@ -100,6 +119,7 @@ export function syncDay(day: string) {
       reply_parent: r.reply_parent,
       reply_root: r.reply_root,
       embed: r.embed,
+      links: linksIn(r.record),
       is_en: r.is_en ?? 0,
       keyword_ids: keywords,
     })
