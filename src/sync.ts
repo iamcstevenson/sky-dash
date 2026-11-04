@@ -6,7 +6,7 @@ import { accounts } from './accounts.ts'
 import { collector } from './jetstream.ts'
 import { listKeywords } from './keywords.ts'
 import { listGroups } from './groups.ts'
-import { judgeRow } from './rules.ts'
+import { groupRulesFor, judgeRow, rulesFor } from './rules.ts'
 
 const WINDOW_DAYS = 30
 const DAY_MS = 86_400_000
@@ -28,8 +28,15 @@ export function syncState() {
          WHERE did IN (SELECT subject_did FROM follows) ORDER BY did`,
       )
       .all(),
-    keywords: listKeywords().filter((k) => k.enabled).map((k) => ({ id: k.id, query: k.query })),
-    groups: listGroups().map((g) => ({ id: g.id, name: g.name, keyword_ids: g.keywordIds })),
+    // Paused keywords too, so the phone can resume them. Only enabled ones match posts.
+    keywords: listKeywords().map((k) => {
+      const r = rulesFor(k.id)
+      return { id: k.id, query: k.query, enabled: !!k.enabled, in_feed: !!k.in_feed, must: r.must, exclude: r.exclude }
+    }),
+    groups: listGroups().map((g) => {
+      const r = groupRulesFor(g.id)
+      return { id: g.id, name: g.name, keyword_ids: g.keywordIds, must: r.must, exclude: r.exclude }
+    }),
   }
 }
 
