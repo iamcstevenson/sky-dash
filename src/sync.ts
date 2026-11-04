@@ -7,6 +7,7 @@ import { collector } from './jetstream.ts'
 import { listKeywords } from './keywords.ts'
 import { listGroups } from './groups.ts'
 import { listDrafts } from './drafts.ts'
+import './profileDetails.ts' // creates the table the state reads
 import { groupRulesFor, judgeRow, rulesFor } from './rules.ts'
 
 const WINDOW_DAYS = 30
@@ -26,6 +27,13 @@ export function syncState() {
     profiles: db
       .prepare(
         `SELECT did, handle, display_name, avatar FROM profiles
+         WHERE did IN (SELECT subject_did FROM follows) ORDER BY did`,
+      )
+      .all(),
+    // Bio and counts for the people you follow, refreshed every few hours
+    profile_details: db
+      .prepare(
+        `SELECT did, description, followers, follows, posts FROM profile_details
          WHERE did IN (SELECT subject_did FROM follows) ORDER BY did`,
       )
       .all(),
