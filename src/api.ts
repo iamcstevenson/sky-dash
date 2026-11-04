@@ -11,7 +11,7 @@ import { notifStatus } from './notifications.ts'
 import { trending, postsForTopic } from './trending.ts'
 import { isEnglish } from './lang.ts'
 import { judgeRow, judge, rulesFor, groupRulesFor, saveRules, setAuthor, suggestedAuthors, suggestedForGroup, searchText, type Verdict } from './rules.ts'
-import { listGroups, memberIds, createGroup, removeGroup, updateGroup, setGroupAuthor, setKeywordGroups, moveKeyword, orderKeywords, orderGroups, groupHasRules } from './groups.ts'
+import { listGroups, memberIds, setMembers, createGroup, removeGroup, updateGroup, setGroupAuthor, setKeywordGroups, moveKeyword, orderKeywords, orderGroups, groupHasRules } from './groups.ts'
 import { discover, dismiss, audition, auditionList, refreshDiscover, discoverStatus, clearDiscoverCache } from './discover.ts'
 import { uploadLimits, jobStatus, videoEmbed } from './video.ts'
 import { groupedNotifications, unreadCounts, markSeen, profilesFor, recentChats, searchPeople, sendPostViaChat } from './notifs.ts'
@@ -403,12 +403,19 @@ const routes: Record<string, Handler> = {
     }
   },
 
+  // ifMissing (from Hub, which may resend after a crash): an existing keyword is returned instead of an error
   'POST /api/keywords/add': async (_q, b) => {
     const query = String(b.query ?? '').trim()
     if (!query) throw new HttpError(400, 'Enter a keyword or phrase')
     if (query.length > 200) throw new HttpError(400, 'Keep keywords under 200 characters')
-    if (listKeywords().some((k) => k.query.toLowerCase() === query.toLowerCase())) throw new HttpError(409, 'You already have that keyword')
+    const existing = listKeywords().find((k) => k.query.toLowerCase() === query.toLowerCase())
+    if (existing && b.ifMissing) return { id: existing.id, existed: true }
+    if (existing) throw new HttpError(409, 'You already have that keyword')
     const kw = addKeyword(query)
+    if (b.must !== undefined || b.exclude !== undefined) saveRules(kw.id, b.must, b.exclude)
+    if (typeof b.inFeed === 'boolean') db.prepare('UPDATE keywords SET in_feed = ? WHERE id = ?').run(b.inFeed ? 1 : 0, kw.id)
+    if (Array.isArray(b.groupIds) && b.groupIds.length) setKeywordGroups(kw.id, b.groupIds.map(Number))
+    resetKeywordCaches()
     // Fill the last 48 hours in the background; the page polls for progress
     pollKeywords(kw.id).catch(() => {})
     return { id: kw.id }
@@ -446,8 +453,14 @@ const routes: Record<string, Handler> = {
 
   // ---------- keyword groups ----------
 
+  // ifMissing (from Hub, which may resend after a crash): a group with the same name is updated instead
   'POST /api/groups/create': async (_q, b) => {
-    const res = createGroup(b.name, Array.isArray(b.keywordIds) ? b.keywordIds.map(Number) : [])
+    const name = String(b.name ?? '').trim()
+    const existing = b.ifMissing ? listGroups().find((g) => g.name.toLowerCase() === name.toLowerCase()) : undefined
+    const res = existing ? { id: existing.id } : createGroup(b.name, Array.isArray(b.keywordIds) ? b.keywordIds.map(Number) : [])
+    if (existing || b.must !== undefined || b.exclude !== undefined) {
+      updateGroup(res.id, { must: b.must, exclude: b.exclude, ...(existing && Array.isArray(b.keywordIds) ? { keywordIds: b.keywordIds } : {}) })
+    }
     resetKeywordCaches()
     return res
   },
@@ -512,6 +525,32 @@ const routes: Record<string, Handler> = {
     setAuthor(Number(b.id), String(b.did), verdict)
     resetKeywordCaches()
     return { ok: true }
+  },
+
+  // Several keywords at once, from Hub: pause or resume, custom feed on or off, join or leave a group, or delete
+  'POST /api/keywords/bulk': async (_q, b) => {
+    const known = new Set(listKeywords().map((k) => k.id))
+    const ids = (Array.isArray(b.ids) ? b.ids.map(Number) : []).filter((id: number) => known.has(id))
+    if (b.remove === true) {
+      for (const id of ids) removeKeyword(id)
+      resetKeywordCaches()
+      return { ok: true, count: ids.length }
+    }
+    for (const id of ids) {
+      if (typeof b.enabled === 'boolean') db.prepare('UPDATE keywords SET enabled = ? WHERE id = ?').run(b.enabled ? 1 : 0, id)
+      if (typeof b.inFeed === 'boolean') db.prepare('UPDATE keywords SET in_feed = ? WHERE id = ?').run(b.inFeed ? 1 : 0, id)
+    }
+    const groups = new Set(listGroups().map((g) => g.id))
+    for (const [key, add] of [['addGroup', true], ['removeGroup', false]] as const) {
+      const group = Number(b[key])
+      if (!group) continue
+      if (!groups.has(group)) throw new HttpError(404, 'That group no longer exists')
+      const members = memberIds(group)
+      setMembers(group, add ? [...members, ...ids.filter((id: number) => !members.includes(id))] : members.filter((id) => !ids.includes(id)))
+    }
+    if (b.enabled === true) for (const id of ids) pollKeywords(id).catch(() => {})
+    resetKeywordCaches()
+    return { ok: true, count: ids.length }
   },
 
   'POST /api/keywords/remove': async (_q, b) => {
