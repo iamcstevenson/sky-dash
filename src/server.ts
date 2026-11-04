@@ -14,6 +14,7 @@ import { startNotificationSync } from './notifications.ts'
 import { startDiscoverRefresh } from './discover.ts'
 import { uploadVideo } from './video.ts'
 import { receiveMedia, mediaFile } from './drafts.ts'
+import { startProfileDetails } from './profileDetails.ts'
 
 const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url))
 const TYPES: Record<string, string> = {
@@ -121,6 +122,7 @@ async function main() {
   startHeartbeat()
   runBackfill().catch((err) => console.error('Backfill failed', err))
   startKeywordPolling()
+  startProfileDetails()
   startFeedgen()
   startNotificationSync()
   startDiscoverRefresh()
