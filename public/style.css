@@ -580,3 +580,22 @@ a.pc-btn:hover { text-decoration: none; border-color: var(--accent); }
   border: 1px solid var(--border); background: var(--bg); color: var(--text);
 }
 .rules-checks { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+
+/* ---------- drafts ---------- */
+.drafts-btn { margin-left: auto; }
+.drafts-btn + .compose-btn { margin-left: 0; }
+.draft-list { display: flex; flex-direction: column; gap: 10px; }
+.draft-row { display: flex; flex-direction: column; gap: 6px; background: var(--bg); }
+.draft-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 0.85em; color: var(--dim, #888); }
+.draft-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.draft-text.empty { color: var(--dim, #888); font-style: italic; }
+.draft-thumbs { display: flex; gap: 6px; }
+.draft-thumbs img, .draft-thumbs .thumb-missing { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; background: var(--surface-2); }
+.draft-thumbs .thumb-missing { display: grid; place-items: center; font-size: 0.75em; color: var(--dim, #888); }
+.draft-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.draft-note { border: 1px solid var(--border); border-left: 3px solid #e0a020; border-radius: 8px; padding: 8px 10px; font-size: 0.9em; margin-bottom: 10px; background: var(--surface-2); }
+.draft-note button { margin-left: 6px; font-size: 0.9em; padding: 2px 10px; }
+.draft-note details { margin-top: 6px; }
+.draft-note pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; margin: 4px 0 0; }
+.draft-done { opacity: 0.75; }
+.draft-section { font-weight: 600; margin: 12px 0 4px; }
