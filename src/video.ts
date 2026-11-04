@@ -3,6 +3,7 @@
 // 2. stream the video to the video service, which converts it to MP4 and checks it,
 // 3. poll the job until it's done; the result is a blob reference the post can embed.
 import type { IncomingMessage } from 'node:http'
+import { createReadStream } from 'node:fs'
 import { Readable } from 'node:stream'
 import { AtpAgent } from '@atproto/api'
 import { accountBySlot } from './accounts.ts'
@@ -76,6 +77,47 @@ export async function uploadVideo(req: IncomingMessage, url: URL) {
   const job = data.jobStatus ?? data
   if (!res.ok && !job?.jobId) throw new VideoError(res.status === 413 ? 413 : 502, data.message ?? `Video service error (${res.status})`)
   return { jobId: job.jobId, state: job.state, blob: job.blob ?? null }
+}
+
+// The same upload as above, from a draft's stored file instead of the page's request
+export async function uploadVideoFile(slot: number, path: string, type: string, size: number, fileName: string) {
+  if (!VIDEO_TYPES.has(type)) throw new VideoError(415, 'Videos must be MP4, MOV, WebM or MPEG')
+  if (size > MAX_VIDEO_BYTES) throw new VideoError(413, 'Videos can be at most 100 MB')
+  const account = signedIn(slot)
+  const limits = await uploadLimits(slot)
+  if (!limits.canUpload) throw new VideoError(403, limits.message || "Bluesky isn't allowing video uploads for this account right now")
+  const { token } = await serviceToken(slot, `did:web:${account.agent.dispatchUrl.host}`, 'com.atproto.repo.uploadBlob')
+  const target = new URL(`${VIDEO_SERVICE}/xrpc/app.bsky.video.uploadVideo`)
+  target.searchParams.set('did', account.did!)
+  target.searchParams.set('name', fileName.replace(/[^\w.\- ]+/g, '_').slice(0, 100) || 'video')
+  const res = await fetch(target, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': type, 'Content-Length': String(size) },
+    body: Readable.toWeb(createReadStream(path)) as any,
+    duplex: 'half',
+  } as any)
+  const data: any = await res.json().catch(() => ({}))
+  const job = data.jobStatus ?? data
+  if (!res.ok && !job?.jobId) throw new VideoError(res.status === 413 ? 413 : 502, data.message ?? `Video service error (${res.status})`)
+  return { jobId: String(job.jobId), blob: job.blob ?? null }
+}
+
+// Waits for Bluesky to finish processing a video and returns its blob reference
+export async function waitForVideo(jobId: string, timeoutMs = 10 * 60_000) {
+  const until = Date.now() + timeoutMs
+  while (Date.now() < until) {
+    let s: Awaited<ReturnType<typeof jobStatus>> | null = null
+    try {
+      s = await jobStatus(jobId)
+    } catch {
+      // A brief hiccup while polling isn't fatal
+    }
+    // As plain JSON ({ $type: 'blob', ref: { $link } }), which is what the post record and videoEmbed expect
+    if (s?.state === 'JOB_STATE_COMPLETED' && s.blob) return JSON.parse(JSON.stringify(s.blob))
+    if (s?.state === 'JOB_STATE_FAILED') throw new VideoError(422, s.message || s.error || "Bluesky couldn't process this video")
+    await new Promise((r) => setTimeout(r, 2000))
+  }
+  throw new VideoError(504, 'Bluesky took too long to process the video')
 }
 
 export async function jobStatus(jobId: string) {

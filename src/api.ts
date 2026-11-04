@@ -16,6 +16,7 @@ import { discover, dismiss, audition, auditionList, refreshDiscover, discoverSta
 import { uploadLimits, jobStatus, videoEmbed } from './video.ts'
 import { groupedNotifications, unreadCounts, markSeen, profilesFor, recentChats, searchPeople, sendPostViaChat } from './notifs.ts'
 import { syncState, syncDay } from './sync.ts'
+import { listDrafts, getDraft, saveDraft, deleteDraft, dismissReplaced, startPosting, finishPosting, place } from './drafts.ts'
 
 type Query = URLSearchParams
 type Handler = (q: Query, body: any) => Promise<unknown>
@@ -698,70 +699,107 @@ const routes: Record<string, Handler> = {
 
   // New post, reply (replyTo) or quote (quote) from one of your accounts
   // images: up to 4 of { data (base64), mime, alt, width, height }, already resized in the browser
-  'POST /api/compose': async (_q, b) => {
-    const acct = account(b.slot)
-    const text = String(b.text ?? '').trim()
-    const images = Array.isArray(b.images) ? b.images : []
-    if (!text && !images.length && !b.video) throw new HttpError(400, 'Write something or add an image or video')
-    if (images.length && b.video) throw new HttpError(400, 'A post can have images or a video, not both')
-    const videoMedia = b.video ? videoEmbed(b.video) : null
-    if (images.length > MAX_IMAGES) throw new HttpError(400, `At most ${MAX_IMAGES} images per post`)
-    const decoded = images.map((img: any, i: number) => {
-      const mime = String(img?.mime ?? '')
-      if (!IMAGE_TYPES.has(mime)) throw new HttpError(400, `Image ${i + 1}: unsupported type ${mime || '(unknown)'}`)
-      const bytes = Buffer.from(String(img?.data ?? ''), 'base64')
-      if (!bytes.length) throw new HttpError(400, `Image ${i + 1} is empty`)
-      if (bytes.length > MAX_IMAGE_BYTES) throw new HttpError(400, `Image ${i + 1} is over 2 MB after resizing`)
-      const alt = String(img?.alt ?? '').trim().slice(0, 2000)
-      const width = Math.round(Number(img?.width)) || 0
-      const height = Math.round(Number(img?.height)) || 0
-      return { bytes, mime, alt, width, height }
-    })
+  'POST /api/compose': async (_q, b) => compose(b),
 
-    const rt = new RichText({ text })
-    await rt.detectFacets(acct.agent)
-    if (rt.graphemeLength > 300) throw new HttpError(400, `Post is ${rt.graphemeLength} characters; the limit is 300`)
+  // ---------- drafts (shared with the Hub iPhone app) ----------
 
-    const record: any = { text: rt.text, facets: rt.facets }
-    const targets = [b.replyTo, b.quote].filter(Boolean)
-    const found = targets.length ? (await acct.agent.app.bsky.feed.getPosts({ uris: targets })).data.posts : []
-    const byUri = new Map(found.map((p) => [p.uri, p]))
-
-    if (b.replyTo) {
-      const parent = byUri.get(b.replyTo)
-      if (!parent) throw new HttpError(404, 'The post you are replying to no longer exists')
-      const parentRef = { uri: parent.uri, cid: parent.cid }
-      const root = (parent.record as any)?.reply?.root ?? parentRef
-      record.reply = { root, parent: parentRef }
-    }
-    let media: any = null
-    if (decoded.length) {
-      // Upload each image to the account's server first; the post then refers to the uploaded files
-      const uploaded = []
-      for (const img of decoded) {
-        const res = await acct.agent.uploadBlob(new Uint8Array(img.bytes), { encoding: img.mime })
-        uploaded.push({
-          image: res.data.blob,
-          alt: img.alt,
-          ...(img.width && img.height ? { aspectRatio: { width: img.width, height: img.height } } : {}),
-        })
-      }
-      media = { $type: 'app.bsky.embed.images', images: uploaded }
-    }
-    if (videoMedia) media = videoMedia
-    if (b.quote) {
-      const quoted = byUri.get(b.quote)
-      if (!quoted) throw new HttpError(404, 'The post you are quoting no longer exists')
-      const quoteEmbed = { $type: 'app.bsky.embed.record', record: { uri: quoted.uri, cid: quoted.cid } }
-      // A quote with images is a "record with media" embed
-      record.embed = media ? { $type: 'app.bsky.embed.recordWithMedia', record: quoteEmbed, media } : quoteEmbed
-    } else if (media) {
-      record.embed = media
-    }
-    const res = await acct.agent.post(record)
-    if (b.replyTo) forget(b.replyTo)
-    return res
+  'GET /api/drafts': async () => ({ drafts: listDrafts() }),
+  'GET /api/drafts/get': async (q) => getDraft(q.get('id')),
+  // b: { id, slot, text, replyTo, media, baseUpdatedAt, editedAt, by }
+  'POST /api/drafts/save': async (_q, b) => saveDraft(b),
+  'POST /api/drafts/delete': async (_q, b) => deleteDraft(b),
+  'POST /api/drafts/dismiss': async (_q, b) => {
+    dismissReplaced(b.id)
+    return { ok: true }
   },
+  // Posts a saved draft. With save (Hub), saves that version first, and refuses if a newer edit from this page is there.
+  'POST /api/drafts/post': async (_q, b) => {
+    const by = b.by === 'iphone' ? 'iphone' : 'mac'
+    if (b.save) {
+      const saved = saveDraft({ ...b.save, by })
+      if (saved.outcome === 'kept-newer') {
+        throw new HttpError(409, `This draft was changed on ${place(saved.draft?.updated_by ?? 'mac')} after you posted it, so it wasn't posted. Open it again to check it, then post.`)
+      }
+      if (saved.outcome === 'deleted') throw new HttpError(404, `This draft was deleted on ${place(saved.draft?.deleted_by ?? 'mac')}, so it wasn't posted.`)
+    }
+    const id = String(b.id ?? b.save?.id ?? '')
+    const post = await startPosting(id)
+    let uri: string | null = null
+    try {
+      const res: any = await compose(post)
+      uri = res?.uri ?? null
+      return res
+    } finally {
+      finishPosting(id, by, uri)
+    }
+  },
+}
+
+// New post, reply (replyTo) or quote (quote) from one of your accounts
+// images: up to 4 of { data (base64), mime, alt, width, height }, already resized
+export async function compose(b: any) {
+  const acct = account(b.slot)
+  const text = String(b.text ?? '').trim()
+  const images = Array.isArray(b.images) ? b.images : []
+  if (!text && !images.length && !b.video) throw new HttpError(400, 'Write something or add an image or video')
+  if (images.length && b.video) throw new HttpError(400, 'A post can have images or a video, not both')
+  const videoMedia = b.video ? videoEmbed(b.video) : null
+  if (images.length > MAX_IMAGES) throw new HttpError(400, `At most ${MAX_IMAGES} images per post`)
+  const decoded = images.map((img: any, i: number) => {
+    const mime = String(img?.mime ?? '')
+    if (!IMAGE_TYPES.has(mime)) throw new HttpError(400, `Image ${i + 1}: unsupported type ${mime || '(unknown)'}`)
+    const bytes = Buffer.from(String(img?.data ?? ''), 'base64')
+    if (!bytes.length) throw new HttpError(400, `Image ${i + 1} is empty`)
+    if (bytes.length > MAX_IMAGE_BYTES) throw new HttpError(400, `Image ${i + 1} is over 2 MB after resizing`)
+    const alt = String(img?.alt ?? '').trim().slice(0, 2000)
+    const width = Math.round(Number(img?.width)) || 0
+    const height = Math.round(Number(img?.height)) || 0
+    return { bytes, mime, alt, width, height }
+  })
+
+  const rt = new RichText({ text })
+  await rt.detectFacets(acct.agent)
+  if (rt.graphemeLength > 300) throw new HttpError(400, `Post is ${rt.graphemeLength} characters; the limit is 300`)
+
+  const record: any = { text: rt.text, facets: rt.facets }
+  const targets = [b.replyTo, b.quote].filter(Boolean)
+  const found = targets.length ? (await acct.agent.app.bsky.feed.getPosts({ uris: targets })).data.posts : []
+  const byUri = new Map(found.map((p) => [p.uri, p]))
+
+  if (b.replyTo) {
+    const parent = byUri.get(b.replyTo)
+    if (!parent) throw new HttpError(404, 'The post you are replying to no longer exists')
+    const parentRef = { uri: parent.uri, cid: parent.cid }
+    const root = (parent.record as any)?.reply?.root ?? parentRef
+    record.reply = { root, parent: parentRef }
+  }
+  let media: any = null
+  if (decoded.length) {
+    // Upload each image to the account's server first; the post then refers to the uploaded files
+    const uploaded = []
+    for (const img of decoded) {
+      const res = await acct.agent.uploadBlob(new Uint8Array(img.bytes), { encoding: img.mime })
+      uploaded.push({
+        image: res.data.blob,
+        alt: img.alt,
+        ...(img.width && img.height ? { aspectRatio: { width: img.width, height: img.height } } : {}),
+      })
+    }
+    media = { $type: 'app.bsky.embed.images', images: uploaded }
+  }
+  if (videoMedia) media = videoMedia
+  if (b.quote) {
+    const quoted = byUri.get(b.quote)
+    if (!quoted) throw new HttpError(404, 'The post you are quoting no longer exists')
+    const quoteEmbed = { $type: 'app.bsky.embed.record', record: { uri: quoted.uri, cid: quoted.cid } }
+    // A quote with images is a "record with media" embed
+    record.embed = media ? { $type: 'app.bsky.embed.recordWithMedia', record: quoteEmbed, media } : quoteEmbed
+  } else if (media) {
+    record.embed = media
+  }
+  const res = await acct.agent.post(record)
+  if (b.replyTo) forget(b.replyTo)
+  return res
 }
 
 export async function handleApi(method: string, url: URL, body: any) {

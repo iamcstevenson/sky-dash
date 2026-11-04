@@ -13,6 +13,7 @@ import { startFeedgen } from './feedgen.ts'
 import { startNotificationSync } from './notifications.ts'
 import { startDiscoverRefresh } from './discover.ts'
 import { uploadVideo } from './video.ts'
+import { receiveMedia, mediaFile } from './drafts.ts'
 
 const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url))
 const TYPES: Record<string, string> = {
@@ -82,9 +83,16 @@ const server = createServer(async (req, res) => {
       // Video files are streamed through as-is. Like JSON, a video content type can't be sent
       // by another website without a CORS preflight, which this server never answers.
       if (url.pathname === '/api/video/upload') return send(res, 200, await uploadVideo(req, url))
+      // A draft's photo or video, from Hub Agent. Same reasoning: these types need a preflight from other sites.
+      if (url.pathname === '/api/drafts/media') return send(res, 200, await receiveMedia(req, url))
       // Blocks other websites from sending actions: they can't send JSON here without a CORS preflight
       if (!req.headers['content-type']?.startsWith('application/json')) throw new HttpError(415, 'JSON only')
       body = await readBody(req)
+    }
+    if (req.method === 'GET' && url.pathname === '/api/drafts/file') {
+      const file = mediaFile(url.searchParams.get('id'), url.searchParams.get('name'))
+      res.writeHead(200, { 'content-type': file.mime, 'content-length': String(file.size), 'cache-control': 'no-store' })
+      return file.stream.pipe(res)
     }
     send(res, 200, await handleApi(req.method ?? 'GET', url, body))
   } catch (err: any) {

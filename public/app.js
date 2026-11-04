@@ -1774,22 +1774,47 @@ async function showThread(uri) {
 
 let composeTarget = {}
 
-function openCompose({ replyTo, quote } = {}) {
-  composeTarget = { replyTo: replyTo?.uri, quote: quote?.uri }
-  $('#composeTitle').textContent = replyTo ? 'Reply' : quote ? 'Quote post' : 'New post'
+// draft: a saved draft to keep editing (see "drafts" below)
+function openCompose({ replyTo, quote, draft } = {}) {
+  composeTarget = { replyTo: replyTo?.uri ?? draft?.reply_to ?? undefined, quote: quote?.uri }
+  composeDraft = draft ? { id: draft.id, updatedAt: draft.updated_at } : null
+  $('#composeTitle').textContent = composeTarget.replyTo ? (draft ? 'Reply draft' : 'Reply') : quote ? 'Quote post' : draft ? 'Draft' : 'New post'
   const ctx = replyTo || quote
   $('#composeContext').innerHTML = ctx ? `<div class="card">${renderPost(ctx, { small: true })}</div>` : ''
   $('#composeAs').innerHTML = state.accounts
     .map((a) => `<option value="${a.slot}" ${a.slot === state.actAs ? 'selected' : ''}>${LETTERS[a.slot]} · @${esc(a.handle)}</option>`)
     .join('')
-  $('#composeText').value = ''
+  $('#composeText').value = draft?.text ?? ''
   $('#composeError').textContent = ''
   composeImages.length = 0
   clearVideo()
+  if (draft) {
+    if (state.accounts.some((a) => a.slot === draft.slot)) $('#composeAs').value = String(draft.slot)
+    for (const m of draft.media) {
+      const url = `/api/drafts/file?id=${encodeURIComponent(draft.id)}&name=${encodeURIComponent(m.name)}`
+      if (m.kind === 'video') {
+        composeVideo = { existing: m.name, url, state: 'ready', progress: 100, alt: m.alt, width: m.width, height: m.height, mime: m.mime, thumb: m.thumb, slot: draft.slot }
+      } else {
+        composeImages.push({ id: ++imageSeq, existing: m.name, url, mime: m.mime, width: m.width, height: m.height, alt: m.alt, thumb: m.thumb })
+      }
+    }
+    renderComposeVideo()
+  }
+  renderDraftNote(draft)
+  // Drafts hold posts and replies; a quote post can't be saved as one
+  $('#composeSaveDraft').hidden = !!quote
   renderComposeImages()
   updateCount()
   $('#composeDialog').showModal()
   $('#composeText').focus()
+  // The post being replied to, when the draft only knows its address
+  if (draft?.reply_to) {
+    api(`/api/post?uri=${encodeURIComponent(draft.reply_to)}`)
+      .then(({ post }) => {
+        if (post && composeDraft?.id === draft.id) $('#composeContext').innerHTML = `<div class="card">${renderPost(post, { small: true })}</div>`
+      })
+      .catch(() => {})
+  }
 }
 
 // Approximate grapheme count; the server does the exact check
@@ -1821,12 +1846,20 @@ $('#composeForm').addEventListener('submit', async (e) => {
     if (composeVideo && !composeVideo.alt.trim() && !confirm("The video has no alt text. People using screen readers won't know what it shows.\n\nPost anyway?")) return
     const missingAlt = composeImages.filter((img) => !img.alt.trim()).length
     if (missingAlt && !confirm(`${missingAlt === 1 ? '1 image has' : `${missingAlt} images have`} no alt text. People using screen readers won't know what ${missingAlt === 1 ? 'it shows' : 'they show'}.\n\nPost anyway?`)) return
-    send.textContent = composeImages.length ? 'Uploading…' : 'Posting…'
-    const images = composeImages.map(({ data, mime, alt, width, height }) => ({ data, mime, alt, width, height }))
-    const video = composeVideo
-      ? { blob: composeVideo.blob, alt: composeVideo.alt, width: composeVideo.width, height: composeVideo.height }
-      : undefined
-    await api('/api/compose', { slot, text: $('#composeText').value, images, video, ...composeTarget })
+    send.textContent = composeImages.length || composeVideo ? 'Uploading…' : 'Posting…'
+    if (composeDraft) {
+      // A draft is saved, then Skydash posts it with its stored photos or video
+      const saved = await saveComposeDraft()
+      if (saved.outcome !== 'saved') return
+      await api('/api/drafts/post', { id: composeDraft.id, by: 'mac' })
+      refreshDraftCount()
+    } else {
+      const images = composeImages.map(({ data, mime, alt, width, height }) => ({ data, mime, alt, width, height }))
+      const video = composeVideo
+        ? { blob: composeVideo.blob, alt: composeVideo.alt, width: composeVideo.width, height: composeVideo.height }
+        : undefined
+      await api('/api/compose', { slot, text: $('#composeText').value, images, video, ...composeTarget })
+    }
     $('#composeDialog').close()
     toast(`Posted as ${acctName(slot)}`)
     if (composeTarget.replyTo) refreshPost(composeTarget.replyTo).catch(() => {})
@@ -1837,6 +1870,238 @@ $('#composeForm').addEventListener('submit', async (e) => {
     send.textContent = 'Post'
   }
 })
+
+// ---------- drafts (shared with the Hub iPhone app) ----------
+
+// { id, updatedAt } while the compose box holds a saved draft
+let composeDraft = null
+
+const place = (by) => (by === 'iphone' ? 'your iPhone' : 'your Mac')
+const when = (ms) => new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+
+// What a newer edit replaced, shown on the draft so each side can see what happened to its version
+function replacedNote(d) {
+  const r = d.replaced
+  if (!r) return ''
+  const what = r.deleted
+    ? `Deleting this draft on ${place(r.by)} (${when(r.at)}) was skipped, because this edit from ${place(d.updated_by)} is newer.`
+    : `This newer edit from ${place(d.updated_by)} replaced the version from ${place(r.by)} saved ${when(r.at)}.`
+  const old = !r.deleted && (r.text || r.media)
+    ? `<details><summary>Show the replaced version</summary><pre>${esc(r.text || '(no text)')}</pre>${r.media ? `<small class="dim">It had ${r.media} photo${r.media === 1 ? '' : 's'} or video.</small>` : ''}</details>`
+    : ''
+  return `${esc(what)} <button type="button" class="secondary" data-dismiss-replaced="${esc(d.id)}">Dismiss</button>${old}`
+}
+
+function renderDraftNote(draft) {
+  const el = $('#composeDraftNote')
+  const html = draft ? replacedNote(draft) : ''
+  el.hidden = !html
+  el.innerHTML = html
+}
+
+// A small JPEG of a photo or the first second of a video, so the iPhone can show the draft without its files
+async function makeThumb(url, isVideo) {
+  try {
+    let source, width, height
+    if (isVideo) {
+      const v = document.createElement('video')
+      v.muted = true
+      v.preload = 'auto'
+      v.src = url
+      await new Promise((resolve, reject) => { v.onloadeddata = resolve; v.onerror = reject })
+      v.currentTime = Math.min(1, (v.duration || 0) / 2)
+      await new Promise((resolve) => { v.onseeked = resolve; setTimeout(resolve, 1500) })
+      source = v
+      width = v.videoWidth
+      height = v.videoHeight
+    } else {
+      source = await createImageBitmap(await (await fetch(url)).blob())
+      width = source.width
+      height = source.height
+    }
+    const scale = Math.min(1, 240 / Math.max(width, height))
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(width * scale))
+    canvas.height = Math.max(1, Math.round(height * scale))
+    canvas.getContext('2d').drawImage(source, 0, 0, canvas.width, canvas.height)
+    return canvas.toDataURL('image/jpeg', 0.7)
+  } catch {
+    return null
+  }
+}
+
+const extFor = (mime) => ({ 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif', 'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/webm': 'webm', 'video/mpeg': 'mpeg' })[mime] ?? 'bin'
+
+// Saves what's in the compose box as a draft. New photos go inline; a new video is uploaded as a file first.
+async function saveComposeDraft() {
+  if (composeImages.some((img) => img.processing)) throw new Error('Still preparing images; try again in a moment')
+  const id = composeDraft?.id ?? crypto.randomUUID()
+  const stamp = Date.now().toString(36)
+  const media = []
+  for (const img of composeImages) {
+    const base = { kind: 'image', mime: img.mime, alt: img.alt, width: img.width, height: img.height }
+    if (img.existing) {
+      media.push({ ...base, name: img.existing, thumb: img.thumb ?? null })
+    } else {
+      media.push({ ...base, name: `photo-${stamp}-${img.id}.${extFor(img.mime)}`, data: img.data, thumb: await makeThumb(img.url, false) })
+    }
+  }
+  const v = composeVideo
+  if (v) {
+    const base = { kind: 'video', alt: v.alt, width: v.width, height: v.height }
+    if (v.existing) {
+      media.push({ ...base, name: v.existing, mime: v.mime, thumb: v.thumb ?? null })
+    } else {
+      const mime = v.file.type || 'video/mp4'
+      const name = `video-${stamp}.${extFor(mime)}`
+      const res = await fetch(`/api/drafts/media?id=${encodeURIComponent(id)}&name=${encodeURIComponent(name)}`, {
+        method: 'POST',
+        headers: { 'content-type': mime },
+        body: v.file,
+      })
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `Video upload failed (${res.status})`)
+      media.push({ ...base, name, mime, thumb: await makeThumb(v.url, true) })
+    }
+  }
+  const res = await api('/api/drafts/save', {
+    id,
+    slot: Number($('#composeAs').value),
+    text: $('#composeText').value,
+    replyTo: composeTarget.replyTo ?? null,
+    media,
+    baseUpdatedAt: composeDraft?.updatedAt ?? null,
+    editedAt: Date.now(),
+    by: 'mac',
+  })
+  composeDraft = { id, updatedAt: res.draft?.updated_at ?? null }
+  if (res.outcome === 'kept-newer') {
+    $('#composeError').textContent = `A newer edit from ${place(res.draft.updated_by)} is already saved, so this one was kept only as the replaced version. Open the draft again to see it.`
+  } else if (res.outcome === 'deleted') {
+    $('#composeError').textContent = `This draft was deleted on ${place(res.draft.deleted_by)} after you opened it.`
+  }
+  refreshDraftCount()
+  return res
+}
+
+$('#composeSaveDraft').addEventListener('click', async () => {
+  const btn = $('#composeSaveDraft')
+  btn.disabled = true
+  $('#composeError').textContent = ''
+  try {
+    const res = await saveComposeDraft()
+    if (res.outcome === 'saved') {
+      $('#composeDialog').close()
+      toast('Draft saved')
+    }
+  } catch (err) {
+    $('#composeError').textContent = err.message
+  } finally {
+    btn.disabled = false
+  }
+})
+
+$('#composeDraftNote').addEventListener('click', async (e) => {
+  const id = e.target.closest('[data-dismiss-replaced]')?.dataset.dismissReplaced
+  if (!id) return
+  await api('/api/drafts/dismiss', { id }).catch(() => {})
+  renderDraftNote(null)
+})
+
+async function refreshDraftCount() {
+  try {
+    const { drafts } = await api('/api/drafts')
+    const open = drafts.filter((d) => !d.posted_at && !d.deleted_at).length
+    $('#draftsBtn').textContent = open ? `Drafts (${open})` : 'Drafts'
+    return drafts
+  } catch {
+    return null
+  }
+}
+
+function draftRow(d) {
+  const thumbs = d.media.map((m) => m.thumb
+    ? `<img src="${esc(m.thumb)}" alt="${esc(m.alt || (m.kind === 'video' ? 'Video' : 'Photo'))}">`
+    : `<span class="thumb-missing">${m.kind === 'video' ? 'Video' : 'Photo'}</span>`).join('')
+  const meta = [
+    badge(d.slot),
+    d.reply_to ? 'Reply' : 'Post',
+    `edited ${when(d.updated_at)} on ${place(d.updated_by)}`,
+  ].join(' · ')
+  const note = replacedNote(d)
+  return `<div class="card draft-row" data-draft="${esc(d.id)}">
+    <div class="draft-meta">${meta}</div>
+    ${note ? `<div class="draft-note">${note}</div>` : ''}
+    <div class="draft-text ${d.text.trim() ? '' : 'empty'}">${esc(d.text.trim() || '(no text)')}</div>
+    ${thumbs ? `<div class="draft-thumbs">${thumbs}</div>` : ''}
+    <div class="draft-actions">
+      <button class="secondary" data-draft-delete>Delete</button>
+      <button class="secondary" data-draft-edit>Edit</button>
+      <button class="primary" data-draft-post ${d.posting ? 'disabled' : ''}>${d.posting ? 'Posting…' : 'Post'}</button>
+    </div>
+  </div>`
+}
+
+function doneRow(d) {
+  const what = d.posted_at
+    ? `Posted ${when(d.posted_at)} from ${place(d.posted_by)}${d.posted_uri ? ` · <a href="https://bsky.app/profile/${esc(d.posted_uri.split('/')[2])}/post/${esc(d.posted_uri.split('/').pop())}" target="_blank" rel="noopener">View</a>` : ''}`
+    : `Deleted ${when(d.deleted_at)} on ${place(d.deleted_by)}`
+  return `<div class="card draft-row draft-done">
+    <div class="draft-meta">${what}</div>
+    ${d.text ? `<div class="draft-text">${esc(d.text)}</div>` : ''}
+  </div>`
+}
+
+let draftsById = new Map()
+
+async function openDrafts() {
+  $('#adTitle').textContent = 'Drafts'
+  $('#adBody').innerHTML = '<p class="dim">Loading…</p>'
+  if (!$('#actionDialog').open) $('#actionDialog').showModal()
+  const drafts = (await refreshDraftCount()) ?? []
+  draftsById = new Map(drafts.map((d) => [d.id, d]))
+  const open = drafts.filter((d) => !d.posted_at && !d.deleted_at)
+  // A deleted draft that was never saved here has no account or text worth showing
+  const done = drafts.filter((d) => (d.posted_at || d.deleted_at) && d.slot)
+  $('#adBody').innerHTML = `
+    <p class="dim">Drafts are shared with Hub on your iPhone. If both change the same draft, the newest edit wins and the other is noted on it.</p>
+    <div class="draft-list">${open.length ? open.map(draftRow).join('') : '<p class="dim">No drafts. Use “Save draft” in the post box.</p>'}</div>
+    ${done.length ? `<div class="draft-section">Finished in the last week</div><div class="draft-list">${done.map(doneRow).join('')}</div>` : ''}`
+}
+
+$('#draftsBtn').addEventListener('click', () => openDrafts().catch((err) => toast(err.message)))
+$('#adBody').addEventListener('click', async (e) => {
+  const dismiss = e.target.closest('[data-dismiss-replaced]')?.dataset.dismissReplaced
+  if (dismiss) {
+    await api('/api/drafts/dismiss', { id: dismiss }).catch(() => {})
+    return openDrafts()
+  }
+  const row = e.target.closest('[data-draft]')
+  const d = row && draftsById.get(row.dataset.draft)
+  if (!d) return
+  try {
+    if (e.target.closest('[data-draft-edit]')) {
+      $('#actionDialog').close()
+      openCompose({ draft: d })
+    } else if (e.target.closest('[data-draft-delete]')) {
+      if (!confirm('Delete this draft? It will also disappear from Hub on your iPhone.')) return
+      const res = await api('/api/drafts/delete', { id: d.id, by: 'mac', editedAt: Date.now() })
+      if (res.outcome === 'kept-newer') toast(`Not deleted: it was edited on ${place(d.updated_by)} more recently`)
+      openDrafts()
+    } else if (e.target.closest('[data-draft-post]')) {
+      if (!d.text.trim() && !d.media.length) return toast('This draft is empty')
+      if (!confirm(`Post this as ${acctName(d.slot)}?`)) return
+      e.target.disabled = true
+      e.target.textContent = 'Posting…'
+      await api('/api/drafts/post', { id: d.id, by: 'mac' })
+      toast(`Posted as ${acctName(d.slot)}`)
+      openDrafts()
+    }
+  } catch (err) {
+    toast(err.message)
+    openDrafts()
+  }
+})
+refreshDraftCount()
 
 // ---------- images in the compose box ----------
 
@@ -2031,6 +2296,7 @@ function videoStatusText(v) {
     case 'uploading': return `Uploading… ${v.progress}%`
     case 'processing': return `Processing on Bluesky… ${v.progress ? `${v.progress}%` : ''}`
     case 'ready': {
+      if (v.existing) return 'Saved with the draft'
       const size = v.file.size >= 1e6 ? `${(v.file.size / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(v.file.size / 1e3))} KB`
       return `Ready · ${Math.round(v.duration)}s · ${size}`
     }

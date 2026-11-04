@@ -92,6 +92,7 @@ The **Act as** buttons at the top choose which account likes, reposts, replies, 
 
 - **Images:** up to 4 per post. Click **Add images**, paste one into the text box, or drag files onto the compose box. Each has its own **alt text** box, and Skydash asks before posting an image without one. Images are resized to fit Bluesky's 2 MB limit, and hidden photo metadata like GPS location is removed before upload. GIFs post as a still image.
 - **Video:** one per post, in MP4, MOV, WebM or MPEG, up to 3 minutes and 100 MB. It uploads as soon as you pick it, and **Post** turns on when Bluesky has finished processing it. Add alt text beside the preview. A post can have images or a video, not both. The "Posting as" account is locked while a video is attached, because the upload belongs to that account. Bluesky limits daily video uploads per account and requires a verified email.
+- **Drafts:** **Save draft** in the compose box keeps a post or reply, with its images or video, for later. **Drafts** next to **New post** lists them to edit, post or delete. Drafts are shared with the Hub iPhone app through Hub Agent. If both change the same draft before syncing, the newest edit wins, and the draft notes which version it replaced so you can still see it. Posted and deleted drafts stay listed for a week, so each side can see what happened to them.
 
 ### Following
 

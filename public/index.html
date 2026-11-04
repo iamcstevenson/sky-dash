@@ -142,6 +142,7 @@
       <label class="check" title="Hide posts in other languages"><input type="checkbox" class="english-only"> English only</label>
       <label class="check" id="hideFollowedWrap" hidden><input type="checkbox" id="hideFollowed"> Hide people I follow</label>
       <label class="check" id="showHiddenWrap" hidden title="See what your context rules hid, and why"><input type="checkbox" id="showHidden"> Show hidden posts</label>
+      <button class="secondary drafts-btn" id="draftsBtn">Drafts</button>
       <button class="compose-btn" id="composeBtn">New post</button>
     </div>
 
@@ -159,6 +160,7 @@
     <form method="dialog" id="composeForm">
       <div class="sheet-head"><span id="composeTitle">New post</span><button class="icon-btn" type="button" data-close aria-label="Close">✕</button></div>
       <div class="sheet-body">
+        <div id="composeDraftNote" class="draft-note" hidden></div>
         <div id="composeContext"></div>
         <textarea id="composeText" rows="5" placeholder="Write something… (you can also paste or drop images or a video here)" maxlength="3000"></textarea>
         <div id="composeImages" class="compose-images"></div>
@@ -170,6 +172,7 @@
             <input type="file" id="composeVideoFile" accept="video/mp4,video/quicktime,video/webm,video/mpeg" hidden></label>
           <label>Posting as <select id="composeAs"></select></label>
           <span id="composeCount" class="count">300</span>
+          <button type="button" class="secondary" id="composeSaveDraft">Save draft</button>
           <button type="submit" class="primary" id="composeSend">Post</button>
         </div>
         <div id="composeError" class="error"></div>
