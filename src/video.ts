@@ -112,7 +112,8 @@ export async function waitForVideo(jobId: string, timeoutMs = 10 * 60_000) {
     } catch {
       // A brief hiccup while polling isn't fatal
     }
-    if (s?.state === 'JOB_STATE_COMPLETED' && s.blob) return s.blob
+    // As plain JSON ({ $type: 'blob', ref: { $link } }), which is what the post record and videoEmbed expect
+    if (s?.state === 'JOB_STATE_COMPLETED' && s.blob) return JSON.parse(JSON.stringify(s.blob))
     if (s?.state === 'JOB_STATE_FAILED') throw new VideoError(422, s.message || s.error || "Bluesky couldn't process this video")
     await new Promise((r) => setTimeout(r, 2000))
   }
