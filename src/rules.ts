@@ -110,12 +110,21 @@ type Rules = {
 
 const cache = new Map<number, Rules>()
 
+// People type "exact phrases" in quotes, as in the keyword box. Rule words are always whole words or
+// phrases, so the quotes add nothing and would otherwise have to appear in the post.
+function unquote(term: string): string {
+  const t = term.trim()
+  if (/^["“”'‘’]+$/.test(t)) return ''
+  const m = t.match(/^["“”'‘’](.+)["“”'‘’]$/s)
+  return m ? m[1].trim() : t
+}
+
 export function cleanTerms(list: unknown): string[] {
   const arr = Array.isArray(list) ? list : String(list ?? '').split(/[\n,]+/)
   const seen = new Set<string>()
   const out: string[] = []
   for (const raw of arr) {
-    const t = String(raw).trim().slice(0, 80)
+    const t = unquote(String(raw)).slice(0, 80)
     if (t && !seen.has(t.toLowerCase())) {
       seen.add(t.toLowerCase())
       out.push(t)
@@ -163,7 +172,12 @@ function isAllCaps(term: string) {
   return letters.length >= 2 && letters === letters.toUpperCase()
 }
 
-function compile(terms: string[]): RegExp | null {
+// Stands in for a hide word that is empty once its quotes are removed, keeping the list in step with `exclude`
+const NEVER = /(?!)/
+
+function compile(raw: string[]): RegExp | null {
+  // Words saved before quotes were stripped on save still have them
+  const terms = raw.map(unquote).filter(Boolean)
   if (!terms.length) return null
   // Case-sensitive terms (ALL CAPS) and the rest need different flags, so build one regex for each group
   const exact = terms.filter(isAllCaps).map(termPattern)
@@ -192,7 +206,7 @@ export function rulesFor(id: number): Rules {
     must,
     exclude,
     mustRe: compile(must),
-    excludeRe: exclude.map((t) => compile([t])!),
+    excludeRe: exclude.map((t) => compile([t]) ?? NEVER),
     trusted,
     blocked,
   }
@@ -226,7 +240,7 @@ export function groupRulesFor(id: number): GroupRules {
   }[]) {
     ;(a.verdict === 'trusted' ? trusted : blocked).add(a.author_did)
   }
-  const rules = { name: row?.name ?? '', must, exclude, mustRe: compile(must), excludeRe: exclude.map((t) => compile([t])!), trusted, blocked }
+  const rules = { name: row?.name ?? '', must, exclude, mustRe: compile(must), excludeRe: exclude.map((t) => compile([t]) ?? NEVER), trusted, blocked }
   groupCache.set(id, rules)
   return rules
 }
