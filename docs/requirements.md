@@ -23,7 +23,7 @@ Christian, on his own Mac, and on his iPhone through the Hub app. It's open sour
 | --- | --- |
 | Following | One feed of posts and replies from both accounts' follows over the last 72 hours, with replies shown in context and full threads on demand. |
 | Acting | Like, repost, reply, quote and post from either account, chosen per action, with a warning before both accounts like or repost the same post. |
-| Keywords | Public posts from anyone in the last 48 hours matching chosen keywords, with context rules and groups so a keyword means one thing. |
+| Keywords | Public posts from anyone in the last 48 hours matching chosen keywords, with context rules so a keyword means one thing. Groups are topics defined by one list of topic words (each searched), with vague words that need context (issue #10). |
 | Follows | Per-follow stats: posts, replies and reposts in 14 days, repost share, last active, follows back, has interacted, overlap between the accounts. Bulk unfollow, mute and move-to-list, each confirmed, with Undo where possible. |
 | Trending | What's rising among the people followed, compared with the previous week, with a drill-down to the posts behind each topic. |
 | Phone | Usable from the iPhone without public hosting (Tailscale, and the Hub app's synced copy). |

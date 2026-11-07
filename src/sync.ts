@@ -46,7 +46,8 @@ export function syncState() {
     drafts: listDrafts(),
     groups: listGroups().map((g) => {
       const r = groupRulesFor(g.id)
-      return { id: g.id, name: g.name, keyword_ids: g.keywordIds, must: r.must, exclude: r.exclude }
+      // must = context words: only keyword_ids listed in needs_context_ids need them
+      return { id: g.id, name: g.name, keyword_ids: g.keywordIds, needs_context_ids: g.needsContextIds, must: r.must, exclude: r.exclude }
     }),
   }
 }

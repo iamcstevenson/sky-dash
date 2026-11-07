@@ -377,6 +377,7 @@ const routes: Record<string, Handler> = {
           id: g.id,
           name: g.name,
           keywordIds: g.keywordIds,
+          needsContextIds: g.needsContextIds,
           count: counts.groups.get(g.id)?.kept ?? 0,
           hidden: counts.groups.get(g.id)?.hidden ?? 0,
           hasRules: groupHasRules(g.id),
@@ -459,8 +460,14 @@ const routes: Record<string, Handler> = {
     const name = String(b.name ?? '').trim()
     const existing = b.ifMissing ? listGroups().find((g) => g.name.toLowerCase() === name.toLowerCase()) : undefined
     const res = existing ? { id: existing.id } : createGroup(b.name, Array.isArray(b.keywordIds) ? b.keywordIds.map(Number) : [])
-    if (existing || b.must !== undefined || b.exclude !== undefined) {
-      updateGroup(res.id, { must: b.must, exclude: b.exclude, ...(existing && Array.isArray(b.keywordIds) ? { keywordIds: b.keywordIds } : {}) })
+    if (existing || b.must !== undefined || b.exclude !== undefined || Array.isArray(b.topics)) {
+      const created = updateGroup(res.id, {
+        must: b.must,
+        exclude: b.exclude,
+        topics: b.topics,
+        ...(existing && Array.isArray(b.keywordIds) ? { keywordIds: b.keywordIds } : {}),
+      })
+      for (const id of created) pollKeywords(id).catch(() => {})
     }
     resetKeywordCaches()
     return res
@@ -478,12 +485,19 @@ const routes: Record<string, Handler> = {
       blocked: handlesFor([...r.blocked]),
       suggested: suggested.map((x, i) => ({ ...sugg[i], kept: x.kept })),
       keywordIds: memberIds(id),
+      // The group's topic words in order: each is a keyword, searched on Bluesky
+      topics: memberIds(id).map((kid) => {
+        const k = listKeywords().find((x) => x.id === kid)
+        return k ? { id: k.id, query: k.query, enabled: !!k.enabled, needsContext: r.needsContext.has(k.id) } : null
+      }).filter(Boolean),
     }
   },
+  // topics (from the page) replaces the group's topic words; keywordIds (from Hub) still sets members directly
   'POST /api/groups/update': async (_q, b) => {
-    updateGroup(Number(b.id), b)
+    const created = updateGroup(Number(b.id), b)
+    for (const id of created) pollKeywords(id).catch(() => {})
     resetKeywordCaches()
-    return { ok: true }
+    return { ok: true, created }
   },
   'POST /api/groups/remove': async (_q, b) => {
     removeGroup(Number(b.id))

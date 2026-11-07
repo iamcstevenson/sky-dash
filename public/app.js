@@ -473,19 +473,20 @@ document.querySelectorAll('.tab[data-tab]').forEach((t) => t.addEventListener('c
 // Why a group can't find new posts, or null. Group rules only filter what its keywords collect.
 function groupProblem(keywordIds) {
   const members = keywordIds.map((id) => state.kw.list.find((k) => k.id === id)).filter(Boolean)
-  if (!members.length) return 'This group has no keywords, so it can’t find any posts. Its rules only filter posts that its keywords collect. Tick at least one keyword.'
-  if (members.every((k) => !k.enabled)) return `Every keyword in this group is paused, so no new posts are coming in. Resume ${members.length === 1 ? 'it' : 'one'} with ▶.`
+  if (!members.length) return 'This group has no topic words, so it can’t find any posts. Add some with ⚙.'
+  if (members.every((k) => !k.enabled)) return `Every topic word in this group is paused, so no new posts are coming in. Resume ${members.length === 1 ? 'it' : 'one'} with ▶.`
   return null
 }
 
 function keywordChip(k, groupId) {
+  const vague = groupId && state.kw.groups.find((g) => g.id === groupId)?.needsContextIds?.includes(k.id)
   const status = k.error
     ? `<span class="warn" title="${esc(k.error)}">⚠</span>`
     : k.lastPollMs === 0 && k.enabled ? '<span class="n">searching…</span>'
     : `<span class="n" title="${k.capped ? 'Very common keyword: only the newest 2,000 matches per check are kept. ' : ''}${k.count.toLocaleString()} shown, ${k.hidden.toLocaleString()} hidden by your context rules (last ${state.kw.hours} hours)">${k.count.toLocaleString()}${k.capped ? '+' : ''}${k.hidden ? `<span class="hid"> · ${k.hidden.toLocaleString()} hidden</span>` : ''}</span>`
   const selected = state.kw.selected.has(k.id) && state.kw.group === groupId
   return `<span class="kw-chip ${selected ? 'selected' : ''} ${k.enabled ? '' : 'off'}" data-kw="${k.id}" ${groupId ? `data-group="${groupId}"` : ''} draggable="true">
-    <button class="kw-name" data-kw-act="select" title="${esc(k.query)}: click to show only this keyword. Drag to move it.">${esc(k.query)}</button>${status}
+    <button class="kw-name" data-kw-act="select" title="${esc(k.query)}${vague ? ' (vague: needs another topic word or a context word)' : ''}: click to show only this keyword. Drag to move it.">${esc(k.query)}${vague ? '<span class="vague-mark">?</span>' : ''}</button>${status}
     <button data-kw-act="rules" class="${k.hasRules ? 'has-rules' : ''}" title="${k.hasRules ? 'Edit' : 'Set'} what “${esc(k.query)}” should mean">⚙</button>
     <button data-kw-act="toggle" title="${k.enabled ? 'Pause' : 'Resume'} this keyword">${k.enabled ? '❚❚' : '▶'}</button>
     <button data-kw-act="feed" title="${k.inFeed ? 'Included in' : 'Left out of'} your Bluesky custom feed">${k.inFeed ? '📡' : '<span style="opacity:.35">📡</span>'}</button>
@@ -878,9 +879,11 @@ async function openRules(k) {
   const checks = (items, checked, name) => `<div class="rules-checks">${items.map((x) => `<label class="chip"><input type="checkbox" name="${name}" value="${x.id}" ${checked.includes(x.id) ? 'checked' : ''}> ${esc(x.label)}</label>`).join('')}</div>`
   const groupBits = k.isGroup
     ? `<label class="rules-block"><b>Group name</b><input id="groupName" type="text" maxlength="60" value="${esc(r.name)}"></label>
-       <div class="rules-block"><b>Keywords in this group</b><small>A keyword can be in several groups. Unticking one keeps the keyword.</small>
-         ${checks(state.kw.list.map((x) => ({ id: x.id, label: x.query + (x.enabled ? '' : ' (paused)') })), r.keywordIds, 'member')}
-         <div class="group-warn" id="groupWarn" hidden></div></div>`
+       <label class="rules-block"><b>Topic words</b><small>Each word, #hashtag or "exact phrase" is searched on Bluesky every 2 minutes, and its posts show in this group. Separate them with commas or new lines.</small>
+         <textarea id="topicWords" rows="3">${esc(r.topics.map((t) => t.query).join(', '))}</textarea></label>
+       <div class="rules-block" id="vagueBlock"><b>Vague words</b><small>Tick words that mean other things too, like UK or wildcats. Their posts only show if they also mention another topic word or a context word.</small>
+         <div class="rules-checks" id="topicFlags"></div></div>
+       <div class="group-warn" id="groupWarn" hidden></div>`
     : ''
   const memberOf = !k.isGroup && state.kw.groups.length
     ? `<div class="rules-block"><b>Groups</b><small>A keyword can be in several, each with its own rules.</small>
@@ -889,11 +892,15 @@ async function openRules(k) {
   body.innerHTML = `
     ${groupBits}
     <p class="dim rules-intro">${k.isGroup
-      ? 'These rules apply to every keyword in the group, on top of each keyword’s own rules.'
+      ? 'The rules below apply on top of each topic word’s own rules.'
       : `Posts matching “${esc(label)}” are shown only if they mention one of the first list and none of the second.`}
       Separate words with commas or new lines. Words in ALL CAPS (like UK or SEC) must match exactly; others ignore case.</p>
-    <label class="rules-block"><b>Must mention one of</b><small>Leave empty to keep every match</small>
-      <textarea id="rulesMust" rows="4">${esc(r.must.join(', '))}</textarea></label>
+    ${k.isGroup
+      ? `<div class="rules-block"><label for="rulesMust"><b>Context words</b></label><small>Not searched. A post with a vague word shows if it mentions one of these. <span id="contextUnused" hidden>No topic words are ticked as vague, so these aren’t used right now.</span></small>
+          <textarea id="rulesMust" rows="3">${esc(r.must.join(', '))}</textarea>
+          <button type="button" class="link-btn" id="moveToTopics" hidden>Move these to topic words, so they’re searched too</button></div>`
+      : `<label class="rules-block"><b>Must mention one of</b><small>Leave empty to keep every match</small>
+          <textarea id="rulesMust" rows="4">${esc(r.must.join(', '))}</textarea></label>`}
     <label class="rules-block"><b>Hide if it mentions</b>
       <textarea id="rulesExclude" rows="4">${esc(r.exclude.join(', '))}</textarea></label>
     <div class="rules-block"><b>Always show these accounts</b><div class="people">${people(r.trusted, 'trusted')}</div></div>
@@ -913,29 +920,68 @@ async function openRules(k) {
     refreshKeywordView()
   }))
   const ticked = (name) => [...body.querySelectorAll(`input[name="${name}"]:checked`)].map((i) => Number(i.value))
+  // Topic words: the textarea holds the words; the vague ticks follow it as it's edited
+  const vague = new Map((r.topics ?? []).map((t) => [t.query.toLowerCase(), t.needsContext]))
+  // "Big Blue Nation" and Big Blue Nation are the same topic word for spotting duplicates
+  const topicKey = (t) => t.replace(/["“”]/g, '').trim().toLowerCase()
+  const topicList = () => {
+    const seen = new Set()
+    return $('#topicWords').value.split(/[\n,]+/).map((t) => t.trim()).filter((t) => t && !seen.has(topicKey(t)) && seen.add(topicKey(t)))
+  }
+  const renderTopics = () => {
+    const words = topicList()
+    const known = new Map(state.kw.list.map((x) => [x.query.toLowerCase(), x]))
+    $('#vagueBlock').hidden = !words.length
+    $('#topicFlags').innerHTML = words.map((w) => {
+      const kw = known.get(w.toLowerCase())
+      const note = !kw ? ' (new)' : kw.enabled ? '' : ' (paused)'
+      return `<label class="chip"><input type="checkbox" data-vague="${esc(w.toLowerCase())}" ${vague.get(w.toLowerCase()) ? 'checked' : ''}> ${esc(w)}<span class="dim">${note}</span></label>`
+    }).join('')
+    const anyVague = words.some((w) => vague.get(w.toLowerCase()))
+    const hasContext = $('#rulesMust').value.trim() !== ''
+    $('#contextUnused').hidden = !hasContext || anyVague
+    $('#moveToTopics').hidden = !hasContext
+    // New words will be searched, so only words that already exist can be paused
+    const problem = !words.length
+      ? 'This group has no topic words, so it can’t find any posts. Add at least one above.'
+      : words.every((w) => known.get(w.toLowerCase()) && !known.get(w.toLowerCase()).enabled)
+        ? `Every topic word here is paused, so no new posts are coming in. Resume ${words.length === 1 ? 'it' : 'one'} with ▶ after saving.`
+        : null
+    $('#groupWarn').hidden = !problem
+    $('#groupWarn').textContent = problem ?? ''
+  }
   if (k.isGroup) {
-    const warn = $('#groupWarn')
-    const update = () => {
-      const problem = groupProblem(ticked('member'))
-      warn.hidden = !problem
-      warn.textContent = problem ?? ''
+    $('#topicWords').addEventListener('input', renderTopics)
+    $('#rulesMust').addEventListener('input', renderTopics)
+    $('#topicFlags').addEventListener('change', (e) => {
+      if (e.target.dataset.vague) vague.set(e.target.dataset.vague, e.target.checked)
+      renderTopics()
+    })
+    $('#moveToTopics').onclick = () => {
+      // Context words are whole phrases; as searches they need quotes, or Bluesky looks for the words anywhere
+      const moved = $('#rulesMust').value.split(/[\n,]+/).map((t) => t.trim()).filter(Boolean)
+        .map((t) => (/\s/.test(t) && !/^["“]/.test(t) ? `"${t}"` : t))
+      $('#topicWords').value = [...topicList(), ...moved].join(', ')
+      $('#topicWords').value = topicList().join(', ')
+      $('#rulesMust').value = ''
+      renderTopics()
+      toast('Moved. Tick any vague words, like UK, then Save.')
     }
-    body.querySelectorAll('input[name="member"]').forEach((i) => i.addEventListener('change', update))
-    update()
+    renderTopics()
   }
   $('#rulesSave').onclick = async () => {
+    let searching = null
     try {
       const rules = { id: k.id, must: $('#rulesMust').value, exclude: $('#rulesExclude').value }
       if (k.isGroup) {
-        // Keep the group's existing order; newly ticked keywords go at the end
-        const picked = ticked('member')
-        const keywordIds = [...r.keywordIds.filter((id) => picked.includes(id)), ...picked.filter((id) => !r.keywordIds.includes(id))]
-        await api('/api/groups/update', { ...rules, name: $('#groupName').value, keywordIds })
+        const topics = topicList().map((query) => ({ query, needsContext: !!vague.get(query.toLowerCase()) }))
+        const { created } = await api('/api/groups/update', { ...rules, name: $('#groupName').value, topics })
+        if (created?.length) searching = `Searching the last ${state.kw.hours} hours for ${created.length} new topic word${created.length === 1 ? '' : 's'}…`
       } else {
         await api('/api/keywords/rules', { ...rules, ...(state.kw.groups.length ? { groupIds: ticked('group') } : {}) })
       }
       dlg.close()
-      toast(`Saved “${k.isGroup ? $('#groupName').value.trim() : label}”`)
+      toast(searching ?? `Saved “${k.isGroup ? $('#groupName').value.trim() : label}”`)
       refreshKeywordView()
     } catch (err) {
       toast(err.message)
