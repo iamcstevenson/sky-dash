@@ -564,7 +564,6 @@ a.pc-btn:hover { text-decoration: none; border-color: var(--accent); }
 .kw-group-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 6px 8px; cursor: grab; }
 .kw-group-head button { border: 0; background: none; padding: 3px 6px; border-radius: 6px; color: var(--muted); }
 .kw-group-head button:hover { background: var(--surface-2); }
-.kw-group-head button.has-rules { color: var(--accent); }
 .kw-group-head .kw-group-name { color: var(--text); font-weight: 700; font-size: 14px; }
 .kw-group-head .n { color: var(--muted); font-size: 12px; }
 .kw-group-acts { margin-left: auto; display: inline-flex; align-items: center; }
@@ -572,14 +571,6 @@ a.pc-btn:hover { text-decoration: none; border-color: var(--accent); }
 .kw-loose { display: flex; flex-wrap: wrap; gap: 6px; min-height: 28px; }
 .kw-loose-label { color: var(--muted); font-size: 12px; font-weight: 600; margin: 8px 2px 4px; }
 .kw-new-group { display: block; margin-top: 8px; font-size: 13px; }
-.kw-chip[draggable] { cursor: grab; }
-.kw-chip.dragging, .kw-group.dragging { opacity: .4; }
-.kw-chip.drop-before { box-shadow: -3px 0 0 var(--accent); }
-.kw-chip.drop-after { box-shadow: 3px 0 0 var(--accent); }
-.kw-chip.drop-merge { outline: 2px dashed var(--accent); outline-offset: 1px; }
-.kw-group.drop-before { box-shadow: 0 -3px 0 var(--accent); }
-.kw-group.drop-after { box-shadow: 0 3px 0 var(--accent); }
-.kw-group.drop-into, .kw-loose.drop-into { outline: 2px dashed var(--accent); outline-offset: 2px; border-radius: 10px; }
 .rules-block input[type=text] {
   width: 100%; padding: 7px 10px; border-radius: 8px; font: inherit;
   border: 1px solid var(--border); background: var(--bg); color: var(--text);
@@ -604,7 +595,17 @@ a.pc-btn:hover { text-decoration: none; border-color: var(--accent); }
 .draft-note pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; margin: 4px 0 0; }
 .draft-done { opacity: 0.75; }
 .draft-section { font-weight: 600; margin: 12px 0 4px; }
-.vague-mark {
-  display: inline-grid; place-items: center; width: 14px; height: 14px; margin-left: 4px; border-radius: 50%;
-  font-size: 10px; font-weight: 700; color: var(--muted); border: 1px dashed var(--muted); vertical-align: 1px;
+.kw-form select {
+  max-width: 40%; min-width: 0; padding: 6px 8px; border-radius: 999px; font: inherit; font-size: 13px;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+}
+.kw-edit {
+  min-width: 0; max-width: 100%; padding: 3px 8px; border-radius: 999px; font: inherit; font-size: 13px;
+  border: 1px solid var(--accent); background: var(--bg); color: var(--text);
+}
+.kw-save-sel { margin-top: 8px; font-size: 13px; color: var(--muted); }
+@media (max-width: 520px) {
+  .kw-form { flex-wrap: wrap; }
+  .kw-form input { flex: 1 1 100%; }
+  .kw-form select { flex: 1; max-width: none; }
 }

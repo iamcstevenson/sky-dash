@@ -33,10 +33,11 @@
 
     <section id="kwPanel" class="kw-panel" hidden>
       <form id="kwForm" class="kw-form">
-        <input id="kwInput" type="text" placeholder='Add a keyword, #hashtag or "exact phrase"' maxlength="200" autocomplete="off">
+        <input id="kwInput" type="text" placeholder="Add keywords, separated by commas: Big Blue Nation, #BBN" maxlength="2000" autocomplete="off">
+        <select id="kwGroup" aria-label="Save to group" title="Save the new keywords to a group"><option value="">No group</option><option value="new">New group…</option></select>
         <button type="submit" class="primary">Add</button>
       </form>
-      <div class="kw-help">Uses Bluesky search, so you can also write things like <code>lang:en</code>, <code>-word</code> or <code>from:handle</code>. Click a keyword to show only its posts. ⚙ sets what it should mean (e.g. “cardinals” = the St. Louis Cardinals). Drag keywords to reorder them or move them between groups; hold Option to keep one in both.</div>
+      <div class="kw-help">Words with spaces are searched as an exact phrase. Bluesky search syntax works too: <code>lang:en</code>, <code>-word</code>, <code>from:handle</code>. Click a keyword to show only its posts, double-click to edit it, and ⚙ sets what it should mean (e.g. “cardinals” = the St. Louis Cardinals). Click several loose keywords, then <b>Save as group</b>.</div>
       <div id="kwList" class="kw-list"></div>
       <details id="feedgenBox" class="feedgen">
         <summary>Read this feed in the Bluesky app</summary>

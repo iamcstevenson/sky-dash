@@ -96,10 +96,35 @@ export async function pollKeywords(onlyId?: number) {
   }
 }
 
+// Plain words with spaces are searched as a phrase: without quotes, Bluesky finds the words anywhere in a
+// post (issue #12). Anything using search syntax (quotes, #tag, @handle, -word, field:value, AND/OR/NOT)
+// is kept as typed.
+export function normalizeQuery(raw: string): string {
+  const q = raw.trim().replace(/\s+/g, ' ')
+  const words = q.split(' ')
+  if (words.length < 2) return q
+  const syntax = /["“”:]/.test(q) || words.some((w) => /^[-#@]/.test(w) || /^(AND|OR|NOT)$/.test(w))
+  return syntax ? q : `"${q}"`
+}
+
 export function addKeyword(query: string): Keyword {
   db.prepare('INSERT INTO keywords (query, created_at) VALUES (?, ?)').run(query, Date.now())
   applyPresets() // ready-made context rules for keywords like "cardinals" or "sec"
   return db.prepare('SELECT * FROM keywords WHERE query = ?').get(query) as Keyword
+}
+
+// Changes what a keyword searches for. Its old matches belong to the old text, so they're cleared and
+// the next poll searches the whole window again. Rules, pause, 📡 and groups stay with the keyword.
+export function renameKeyword(id: number, raw: string): string {
+  const query = normalizeQuery(raw).slice(0, 200)
+  if (!query) throw Object.assign(new Error('Enter a keyword or phrase'), { status: 400 })
+  const other = listKeywords().find((k) => k.id !== id && k.query.toLowerCase() === query.toLowerCase())
+  if (other) throw Object.assign(new Error(`You already have “${other.query}”`), { status: 409 })
+  db.prepare('UPDATE keywords SET query = ?, last_poll_ms = 0 WHERE id = ?').run(query, id)
+  db.prepare('DELETE FROM keyword_hits WHERE keyword_id = ?').run(id)
+  delete keywordStatus.errors[id]
+  delete keywordStatus.capped[id]
+  return query
 }
 
 export function removeKeyword(id: number) {

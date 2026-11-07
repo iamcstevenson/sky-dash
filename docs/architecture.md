@@ -26,7 +26,7 @@ Each account's PDS ────────┘                │
 | `backfill.ts` | On startup, reads what was missed while off (14 days on first run). |
 | `hydrate.ts` | Turns stored post URIs into full post views, with each account's like/repost state. |
 | `api.ts` | All `/api/*` routes the page uses. |
-| `keywords.ts`, `rules.ts`, `groups.ts` | Keyword search every 2 minutes, context rules, keyword groups (topic words, with vague ones needing context). |
+| `keywords.ts`, `rules.ts`, `groups.ts` | Keyword search every 2 minutes (multi-word text quoted as a phrase), per-keyword context rules, keyword groups as saved sets. |
 | `follows.ts`, `notifications.ts` | Follow stats and follow-graph actions; interaction history from notifications. |
 | `notifs.ts` | Notifications tab and Send via chat. |
 | `trending.ts` | Topic extraction and rising/popular/shared scoring. |

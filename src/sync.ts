@@ -8,7 +8,7 @@ import { listKeywords } from './keywords.ts'
 import { listGroups } from './groups.ts'
 import { listDrafts } from './drafts.ts'
 import './profileDetails.ts' // creates the table the state reads
-import { groupRulesFor, judgeRow, rulesFor } from './rules.ts'
+import { judgeRow, rulesFor } from './rules.ts'
 
 const WINDOW_DAYS = 30
 const DAY_MS = 86_400_000
@@ -44,11 +44,8 @@ export function syncState() {
     }),
     // Open drafts and ones finished in the last week, so each side sees what happened to the other's
     drafts: listDrafts(),
-    groups: listGroups().map((g) => {
-      const r = groupRulesFor(g.id)
-      // must = context words: only keyword_ids listed in needs_context_ids need them
-      return { id: g.id, name: g.name, keyword_ids: g.keywordIds, needs_context_ids: g.needsContextIds, must: r.must, exclude: r.exclude }
-    }),
+    // Groups have no rules any more (issue #12). The rule fields stay, empty, for Hub builds that read them.
+    groups: listGroups().map((g) => ({ id: g.id, name: g.name, keyword_ids: g.keywordIds, needs_context_ids: [], must: [], exclude: [] })),
   }
 }
 

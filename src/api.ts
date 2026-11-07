@@ -5,13 +5,13 @@ import { accounts, accountBySlot, followCounts } from './accounts.ts'
 import { collector } from './jetstream.ts'
 import { backfill } from './backfill.ts'
 import { hydrate, forget, primaryAccount } from './hydrate.ts'
-import { listKeywords, addKeyword, removeKeyword, pollKeywords, keywordStatus } from './keywords.ts'
+import { listKeywords, addKeyword, removeKeyword, renameKeyword, normalizeQuery, pollKeywords, keywordStatus } from './keywords.ts'
 import { followStats, unfollow, follow, mute, lists, createList, addToList, profileCard } from './follows.ts'
 import { notifStatus } from './notifications.ts'
 import { trending, postsForTopic } from './trending.ts'
 import { isEnglish } from './lang.ts'
-import { judgeRow, judge, rulesFor, groupRulesFor, saveRules, setAuthor, suggestedAuthors, suggestedForGroup, searchText, type Verdict } from './rules.ts'
-import { listGroups, memberIds, setMembers, createGroup, removeGroup, updateGroup, setGroupAuthor, setKeywordGroups, moveKeyword, orderKeywords, orderGroups, groupHasRules } from './groups.ts'
+import { judgeRow, judge, rulesFor, saveRules, setAuthor, suggestedAuthors, searchText, type Verdict } from './rules.ts'
+import { listGroups, memberIds, setMembers, addMembers, createGroup, removeGroup, updateGroup, setKeywordGroups, removeFromGroup, keywordsFor, keepLooseKeywords, orderKeywords, orderGroups } from './groups.ts'
 import { discover, dismiss, audition, auditionList, refreshDiscover, discoverStatus, clearDiscoverCache } from './discover.ts'
 import { uploadLimits, jobStatus, videoEmbed } from './video.ts'
 import { groupedNotifications, unreadCounts, markSeen, profilesFor, recentChats, searchPeople, sendPostViaChat } from './notifs.ts'
@@ -180,7 +180,7 @@ function keywordCounts() {
     value.set(r.keyword_id, c)
     for (const g of groupsOfKeyword.get(r.keyword_id) ?? []) {
       const posts = postsInGroup.get(g)!
-      posts.set(r.uri, posts.get(r.uri) || judge(r.keyword_id, r.author_did, text, g).kept)
+      posts.set(r.uri, posts.get(r.uri) || judge(r.keyword_id, r.author_did, text).kept)
     }
   }
   const groups = new Map<number, Counts>()
@@ -377,10 +377,8 @@ const routes: Record<string, Handler> = {
           id: g.id,
           name: g.name,
           keywordIds: g.keywordIds,
-          needsContextIds: g.needsContextIds,
           count: counts.groups.get(g.id)?.kept ?? 0,
           hidden: counts.groups.get(g.id)?.hidden ?? 0,
-          hasRules: groupHasRules(g.id),
           enabled: members.some((k) => k.enabled),
           inFeed: members.some((k) => k.in_feed),
         }
@@ -407,7 +405,7 @@ const routes: Record<string, Handler> = {
 
   // ifMissing (from Hub, which may resend after a crash): an existing keyword is returned instead of an error
   'POST /api/keywords/add': async (_q, b) => {
-    const query = String(b.query ?? '').trim()
+    const query = normalizeQuery(String(b.query ?? ''))
     if (!query) throw new HttpError(400, 'Enter a keyword or phrase')
     if (query.length > 200) throw new HttpError(400, 'Keep keywords under 200 characters')
     const existing = listKeywords().find((k) => k.query.toLowerCase() === query.toLowerCase())
@@ -421,6 +419,31 @@ const routes: Record<string, Handler> = {
     // Fill the last 48 hours in the background; the page polls for progress
     pollKeywords(kw.id).catch(() => {})
     return { id: kw.id }
+  },
+
+  // Several keywords at once, optionally saved to a group: groupId (existing) or groupName (new)
+  'POST /api/keywords/addMany': async (_q, b) => {
+    const queries = Array.isArray(b.queries) ? b.queries : String(b.queries ?? '').split(/[\n,]+/)
+    if (!queries.some((x: unknown) => String(x ?? '').trim())) throw new HttpError(400, 'Enter a keyword or phrase')
+    if (queries.some((x: unknown) => normalizeQuery(String(x ?? '')).length > 200)) throw new HttpError(400, 'Keep keywords under 200 characters')
+    let groupId = Number(b.groupId) || null
+    if (groupId && !listGroups().some((g) => g.id === groupId)) throw new HttpError(404, 'That group no longer exists')
+    if (!groupId && String(b.groupName ?? '').trim()) groupId = createGroup(b.groupName).id
+    const { ids, created } = keywordsFor(queries, !!groupId)
+    if (groupId) addMembers(groupId, ids)
+    resetKeywordCaches()
+    for (const id of created) pollKeywords(id).catch(() => {})
+    return { ids, created, existed: ids.length - created.length, groupId }
+  },
+
+  // Edits what a keyword searches for; its old matches are cleared and searched again
+  'POST /api/keywords/rename': async (_q, b) => {
+    const id = Number(b.id)
+    if (!listKeywords().some((k) => k.id === id)) throw new HttpError(404, 'That keyword no longer exists')
+    const query = renameKeyword(id, String(b.query ?? ''))
+    resetKeywordCaches()
+    pollKeywords(id).catch(() => {})
+    return { id, query }
   },
 
   'POST /api/keywords/update': async (_q, b) => {
@@ -455,44 +478,34 @@ const routes: Record<string, Handler> = {
 
   // ---------- keyword groups ----------
 
-  // ifMissing (from Hub, which may resend after a crash): a group with the same name is updated instead
+  // ifMissing (from Hub, which may resend after a crash): a group with the same name is updated instead.
+  // Groups have no rules, so must/exclude from older Hub builds are ignored.
   'POST /api/groups/create': async (_q, b) => {
     const name = String(b.name ?? '').trim()
     const existing = b.ifMissing ? listGroups().find((g) => g.name.toLowerCase() === name.toLowerCase()) : undefined
     const res = existing ? { id: existing.id } : createGroup(b.name, Array.isArray(b.keywordIds) ? b.keywordIds.map(Number) : [])
-    if (existing || b.must !== undefined || b.exclude !== undefined || Array.isArray(b.topics)) {
-      const created = updateGroup(res.id, {
-        must: b.must,
-        exclude: b.exclude,
-        topics: b.topics,
-        ...(existing && Array.isArray(b.keywordIds) ? { keywordIds: b.keywordIds } : {}),
-      })
-      for (const id of created) pollKeywords(id).catch(() => {})
-    }
+    const created = updateGroup(res.id, {
+      queries: b.queries,
+      topics: b.topics,
+      ...(existing && Array.isArray(b.keywordIds) ? { keywordIds: b.keywordIds } : {}),
+    })
+    for (const id of created) pollKeywords(id).catch(() => {})
     resetKeywordCaches()
     return res
   },
-  'GET /api/groups/rules': async (q) => {
+  // A group's name and keywords, for its ⚙ panel
+  'GET /api/groups/get': async (q) => {
     const id = Number(q.get('id'))
-    const r = groupRulesFor(id)
-    const suggested = suggestedForGroup(id, Date.now() - config.keywordHours * 3_600_000)
-    const sugg = handlesFor(suggested.map((x) => x.did))
+    const g = listGroups().find((x) => x.id === id)
+    if (!g) throw new HttpError(404, 'That group no longer exists')
+    const all = listKeywords()
     return {
-      name: r.name,
-      must: r.must,
-      exclude: r.exclude,
-      trusted: handlesFor([...r.trusted]),
-      blocked: handlesFor([...r.blocked]),
-      suggested: suggested.map((x, i) => ({ ...sugg[i], kept: x.kept })),
-      keywordIds: memberIds(id),
-      // The group's topic words in order: each is a keyword, searched on Bluesky
-      topics: memberIds(id).map((kid) => {
-        const k = listKeywords().find((x) => x.id === kid)
-        return k ? { id: k.id, query: k.query, enabled: !!k.enabled, needsContext: r.needsContext.has(k.id) } : null
-      }).filter(Boolean),
+      id: g.id,
+      name: g.name,
+      keywords: g.keywordIds.map((kid) => all.find((k) => k.id === kid)).filter(Boolean).map((k) => ({ id: k!.id, query: k!.query, enabled: !!k!.enabled })),
     }
   },
-  // topics (from the page) replaces the group's topic words; keywordIds (from Hub) still sets members directly
+  // queries (the page's keyword list), topics (Hub build 5) or keywordIds (older Hub) set the keywords
   'POST /api/groups/update': async (_q, b) => {
     const created = updateGroup(Number(b.id), b)
     for (const id of created) pollKeywords(id).catch(() => {})
@@ -514,14 +527,8 @@ const routes: Record<string, Handler> = {
     }
     return { ok: true }
   },
-  'POST /api/groups/author': async (_q, b) => {
-    const verdict = b.verdict === 'trusted' || b.verdict === 'blocked' ? b.verdict : null
-    setGroupAuthor(Number(b.id), String(b.did), verdict)
-    resetKeywordCaches()
-    return { ok: true }
-  },
-  'POST /api/groups/move': async (_q, b) => {
-    moveKeyword(b)
+  'POST /api/groups/takeOut': async (_q, b) => {
+    removeFromGroup(Number(b.groupId), Number(b.keywordId))
     resetKeywordCaches()
     return { ok: true }
   },
@@ -563,6 +570,7 @@ const routes: Record<string, Handler> = {
       const members = memberIds(group)
       setMembers(group, add ? [...members, ...ids.filter((id: number) => !members.includes(id))] : members.filter((id) => !ids.includes(id)))
     }
+    keepLooseKeywords()
     if (b.enabled === true) for (const id of ids) pollKeywords(id).catch(() => {})
     resetKeywordCaches()
     return { ok: true, count: ids.length }
@@ -578,7 +586,6 @@ const routes: Record<string, Handler> = {
   'GET /api/keywords/feed': async (q) => {
     const limit = Math.min(Number(q.get('limit')) || 30, 60)
     const wantHidden = q.get('show') === 'filtered'
-    const group = Number(q.get('group')) || null
     const picked: FeedRow[] = []
     let before = Number(q.get('before')) || Infinity
     let scanned = 0
@@ -598,7 +605,7 @@ const routes: Record<string, Handler> = {
         )
         .all(...params, BATCH) as (FeedRow & { record: string | null })[]
       for (const row of batch) {
-        const { verdicts, kept } = judgeRow(row, group)
+        const { verdicts, kept } = judgeRow(row)
         if (kept.length > 0 === !wantHidden) {
           picked.push({ ...row, kws: wantHidden ? row.kws : kept.join(','), verdicts })
           if (picked.length >= limit + 10) break
@@ -629,8 +636,7 @@ const routes: Record<string, Handler> = {
       )
       .all(...params) as { uri: string; author_did: string; record: string | null; kws: string | null }[]
     const wantHidden = q.get('show') === 'filtered'
-    const group = Number(q.get('group')) || null
-    return { count: rows.filter((r) => judgeRow(r, group).kept.length > 0 === !wantHidden).length }
+    return { count: rows.filter((r) => judgeRow(r).kept.length > 0 === !wantHidden).length }
   },
 
   // ---------- custom Bluesky feed ----------

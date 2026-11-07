@@ -470,23 +470,22 @@ document.querySelectorAll('.tab[data-tab]').forEach((t) => t.addEventListener('c
 
 // ---------- keywords ----------
 
-// Why a group can't find new posts, or null. Group rules only filter what its keywords collect.
+// Why a group can't find new posts, or null
 function groupProblem(keywordIds) {
   const members = keywordIds.map((id) => state.kw.list.find((k) => k.id === id)).filter(Boolean)
-  if (!members.length) return 'This group has no topic words, so it can’t find any posts. Add some with ⚙.'
-  if (members.every((k) => !k.enabled)) return `Every topic word in this group is paused, so no new posts are coming in. Resume ${members.length === 1 ? 'it' : 'one'} with ▶.`
+  if (!members.length) return 'This group has no keywords, so it won’t show any posts. Add some with ⚙.'
+  if (members.every((k) => !k.enabled)) return `Every keyword in this group is paused, so no new posts are coming in. Resume ${members.length === 1 ? 'it' : 'them'} with ▶.`
   return null
 }
 
 function keywordChip(k, groupId) {
-  const vague = groupId && state.kw.groups.find((g) => g.id === groupId)?.needsContextIds?.includes(k.id)
   const status = k.error
     ? `<span class="warn" title="${esc(k.error)}">⚠</span>`
     : k.lastPollMs === 0 && k.enabled ? '<span class="n">searching…</span>'
     : `<span class="n" title="${k.capped ? 'Very common keyword: only the newest 2,000 matches per check are kept. ' : ''}${k.count.toLocaleString()} shown, ${k.hidden.toLocaleString()} hidden by your context rules (last ${state.kw.hours} hours)">${k.count.toLocaleString()}${k.capped ? '+' : ''}${k.hidden ? `<span class="hid"> · ${k.hidden.toLocaleString()} hidden</span>` : ''}</span>`
   const selected = state.kw.selected.has(k.id) && state.kw.group === groupId
-  return `<span class="kw-chip ${selected ? 'selected' : ''} ${k.enabled ? '' : 'off'}" data-kw="${k.id}" ${groupId ? `data-group="${groupId}"` : ''} draggable="true">
-    <button class="kw-name" data-kw-act="select" title="${esc(k.query)}${vague ? ' (vague: needs another topic word or a context word)' : ''}: click to show only this keyword. Drag to move it.">${esc(k.query)}${vague ? '<span class="vague-mark">?</span>' : ''}</button>${status}
+  return `<span class="kw-chip ${selected ? 'selected' : ''} ${k.enabled ? '' : 'off'}" data-kw="${k.id}" ${groupId ? `data-group="${groupId}"` : ''}>
+    <button class="kw-name" data-kw-act="select" title="${esc(k.query)}: click to show only this keyword, double-click to edit it">${esc(k.query)}</button>${status}
     <button data-kw-act="rules" class="${k.hasRules ? 'has-rules' : ''}" title="${k.hasRules ? 'Edit' : 'Set'} what “${esc(k.query)}” should mean">⚙</button>
     <button data-kw-act="toggle" title="${k.enabled ? 'Pause' : 'Resume'} this keyword">${k.enabled ? '❚❚' : '▶'}</button>
     <button data-kw-act="feed" title="${k.inFeed ? 'Included in' : 'Left out of'} your Bluesky custom feed">${k.inFeed ? '📡' : '<span style="opacity:.35">📡</span>'}</button>
@@ -499,7 +498,6 @@ function collapsedGroups() {
 }
 
 function renderKeywords() {
-  if (kwDrag) return // a refresh mid-drag would pull the tag out from under the mouse
   const el = $('#kwList')
   const { list, groups } = state.kw
   const inAGroup = new Set(groups.flatMap((g) => g.keywordIds))
@@ -509,27 +507,29 @@ function renderKeywords() {
     const isCollapsed = collapsed.has(g.id)
     const members = g.keywordIds.map((id) => byId.get(id)).filter(Boolean)
     return `<section class="kw-group ${state.kw.group === g.id ? 'selected' : ''} ${g.enabled ? '' : 'off'}" data-group-box="${g.id}">
-      <header class="kw-group-head" draggable="true" data-group-head="${g.id}">
+      <header class="kw-group-head" data-group-head="${g.id}">
         <button data-grp="collapse" aria-expanded="${!isCollapsed}" title="${isCollapsed ? 'Expand' : 'Collapse'}">${isCollapsed ? '▸' : '▾'}</button>
-        <button class="kw-group-name" data-grp="select" title="Show this group's posts. Drag to reorder groups.">${esc(g.name)}</button>
-        <span class="n" title="${g.count.toLocaleString()} posts shown, ${g.hidden.toLocaleString()} hidden by the rules (last ${state.kw.hours} hours)">${members.length} tag${members.length === 1 ? '' : 's'} · ${g.count.toLocaleString()}${g.hidden ? `<span class="hid"> · ${g.hidden.toLocaleString()} hidden</span>` : ''}</span>
+        <button class="kw-group-name" data-grp="select" title="Show this group's posts">${esc(g.name)}</button>
+        <span class="n" title="${g.count.toLocaleString()} posts shown, ${g.hidden.toLocaleString()} hidden by keyword rules (last ${state.kw.hours} hours)">${members.length} keyword${members.length === 1 ? '' : 's'} · ${g.count.toLocaleString()}${g.hidden ? `<span class="hid"> · ${g.hidden.toLocaleString()} hidden</span>` : ''}</span>
         <span class="kw-group-acts">
-          <button data-grp="rules" class="${g.hasRules ? 'has-rules' : ''}" title="Edit this group: name, tags and what it should cover">⚙</button>
+          <button data-grp="rules" title="Rename this group or edit its keywords">⚙</button>
           <button data-grp="toggle" title="${g.enabled ? 'Pause' : 'Resume'} every keyword in this group (also where they're in other groups)">${g.enabled ? '❚❚' : '▶'}</button>
           <button data-grp="feed" title="${g.inFeed ? 'Take this group’s keywords out of' : 'Add this group’s keywords to'} your Bluesky custom feed">${g.inFeed ? '📡' : '<span style="opacity:.35">📡</span>'}</button>
           <button data-grp="remove" title="Delete this group (keeps its keywords)">✕</button>
         </span>
       </header>
       ${!isCollapsed && members.length && groupProblem(g.keywordIds) ? `<div class="group-warn">${esc(groupProblem(g.keywordIds))}</div>` : ''}
-      ${isCollapsed ? '' : `<div class="kw-group-tags" data-drop-group="${g.id}">${members.map((k) => keywordChip(k, g.id)).join('') || '<span class="kw-empty">Drag keywords here, or add them with ⚙.</span>'}</div>`}
+      ${isCollapsed ? '' : `<div class="kw-group-tags" data-drop-group="${g.id}">${members.map((k) => keywordChip(k, g.id)).join('') || '<span class="kw-empty">No keywords yet. Add some with ⚙.</span>'}</div>`}
     </section>`
   }).join('')
   const loose = list.filter((k) => !inAGroup.has(k.id))
   const looseHtml = loose.map((k) => keywordChip(k, null)).join('')
   el.innerHTML = `${groupHtml}
     ${groups.length && loose.length ? '<div class="kw-loose-label">Not in a group</div>' : ''}
-    <div class="kw-loose" data-drop-loose>${looseHtml}${list.length ? '' : '<span class="kw-empty">No keywords yet.</span>'}</div>
+    <div class="kw-loose">${looseHtml}${list.length ? '' : '<span class="kw-empty">No keywords yet.</span>'}</div>
+    ${saveSelectionBar()}
     ${list.length ? '<button type="button" class="link-btn kw-new-group" data-grp="new">+ New group</button>' : ''}`
+  renderGroupPicker()
 }
 
 async function refreshKeywordView() {
@@ -544,11 +544,11 @@ async function handleGroupAction(e) {
   const action = btn.dataset.grp
   try {
     if (action === 'new') {
-      const name = prompt('Name this group (for example, UK Basketball):')?.trim()
+      const name = prompt('Name this group (for example, UK Athletics):')?.trim()
       if (!name) return true
       const { id } = await api('/api/groups/create', { name })
       await loadKeywords()
-      openRules({ isGroup: true, id, name })
+      openGroup(id)
       return true
     }
     const id = Number(btn.closest('[data-group-box]').dataset.groupBox)
@@ -568,7 +568,7 @@ async function handleGroupAction(e) {
         loadFeed(true)
         return true
       case 'rules':
-        openRules({ isGroup: true, id, name: g.name })
+        openGroup(id)
         return true
       case 'toggle':
         await api('/api/groups/set', { id, enabled: !g.enabled })
@@ -589,127 +589,81 @@ async function handleGroupAction(e) {
   return true
 }
 
-// ---------- drag and drop for keywords and groups ----------
+// ---------- saving keywords to groups ----------
 
-let kwDrag = null // { type: 'kw', id, from } or { type: 'group', id }
-let kwDrop = null // where a drop would land right now
-
-function clearDropMarks() {
-  document.querySelectorAll('#kwList .drop-before, #kwList .drop-after, #kwList .drop-into, #kwList .drop-merge')
-    .forEach((x) => x.classList.remove('drop-before', 'drop-after', 'drop-into', 'drop-merge'))
-  kwDrop = null
+// The "Save to" menu next to the add box, rebuilt when groups change; keeps the current choice
+function renderGroupPicker() {
+  const sel = $('#kwGroup')
+  const was = sel.value
+  sel.innerHTML = `<option value="">No group</option>
+    ${state.kw.groups.map((g) => `<option value="${g.id}">${esc(g.name)}</option>`).join('')}
+    <option value="new">New group…</option>`
+  sel.value = [...sel.options].some((o) => o.value === was) ? was : ''
 }
 
-function chipIds(container) {
-  return [...container.querySelectorAll(':scope > .kw-chip')].map((c) => Number(c.dataset.kw))
+// Loose keywords picked by clicking can be saved as a group in one go
+function saveSelectionBar() {
+  if (state.kw.group || !state.kw.selected.size) return ''
+  const n = state.kw.selected.size
+  return `<div class="kw-save-sel">${n} selected <button type="button" class="link-btn" data-save-sel>Save as group…</button></div>`
 }
 
-const kwList = $('#kwList')
-kwList.addEventListener('dragstart', (e) => {
-  const head = e.target.closest?.('[data-group-head]')
-  const chip = e.target.closest?.('.kw-chip')
-  if (head) kwDrag = { type: 'group', id: Number(head.dataset.groupHead), el: head.parentElement }
-  else if (chip) kwDrag = { type: 'kw', id: Number(chip.dataset.kw), from: Number(chip.dataset.group) || null, el: chip }
-  else return
-  e.dataTransfer.effectAllowed = 'copyMove'
-  e.dataTransfer.setData('text/plain', '')
-  requestAnimationFrame(() => kwDrag?.el.classList.add('dragging'))
-})
+// Asks for a group: an existing group's name adds to it; any other name makes a new group
+async function saveToGroupByName(ids) {
+  const names = state.kw.groups.map((g) => g.name).join(', ')
+  const name = prompt(`Name a new group${names ? `, or type an existing one (${names})` : ''}:`)?.trim()
+  if (!name) return
+  const existing = state.kw.groups.find((g) => g.name.toLowerCase() === name.toLowerCase())
+  if (existing) await api('/api/keywords/bulk', { ids, addGroup: existing.id })
+  else await api('/api/groups/create', { name, keywordIds: ids })
+  state.kw.selected.clear()
+  toast(existing ? `Added to “${existing.name}”` : `Saved as “${name}”`)
+  await refreshKeywordView()
+}
 
-kwList.addEventListener('dragover', (e) => {
-  if (!kwDrag) return
-  clearDropMarks()
-  if (kwDrag.type === 'group') {
-    const box = e.target.closest('[data-group-box]')
-    if (!box || box === kwDrag.el) return
-    const r = box.getBoundingClientRect()
-    const after = e.clientY > r.top + r.height / 2
-    box.classList.add(after ? 'drop-after' : 'drop-before')
-    kwDrop = { box, after }
-    e.preventDefault()
-    return
-  }
-  const chip = e.target.closest('.kw-chip')
-  const box = e.target.closest('[data-group-box]')
-  const container = chip?.parentElement ?? box?.querySelector('[data-drop-group]') ?? e.target.closest('[data-drop-loose]')
-  if (!container && !box) return
-  e.preventDefault()
-  // Holding Option copies between groups, since a keyword can be in several
-  e.dataTransfer.dropEffect = e.altKey && kwDrag.from ? 'copy' : 'move'
-  if (chip && chip !== kwDrag.el) {
-    const r = chip.getBoundingClientRect()
-    const x = (e.clientX - r.left) / r.width
-    // The middle of a loose tag makes a new group with it
-    if (!kwDrag.from && !chip.dataset.group && x > 0.3 && x < 0.7) {
-      chip.classList.add('drop-merge')
-      kwDrop = { merge: Number(chip.dataset.kw) }
-      return
-    }
-    chip.classList.add(x > 0.5 ? 'drop-after' : 'drop-before')
-    kwDrop = { container, chip, after: x > 0.5 }
-    return
-  }
-  if (chip) return // over itself
-  ;(box ?? container).classList.add('drop-into')
-  kwDrop = { container, box }
-})
-
-kwList.addEventListener('dragleave', (e) => {
-  if (!kwList.contains(e.relatedTarget)) clearDropMarks()
-})
-
-kwList.addEventListener('drop', async (e) => {
-  if (!kwDrag) return
-  e.preventDefault()
-  const drag = kwDrag
-  const drop = kwDrop
-  const copy = e.altKey
-  kwDrag = null
-  clearDropMarks()
-  if (!drop) return renderKeywords()
+$('#kwList').addEventListener('click', async (e) => {
+  if (!e.target.closest('[data-save-sel]')) return
   try {
-    if (drag.type === 'group') {
-      const ids = state.kw.groups.map((g) => g.id).filter((id) => id !== drag.id)
-      const target = Number(drop.box.dataset.groupBox)
-      ids.splice(ids.indexOf(target) + (drop.after ? 1 : 0), 0, drag.id)
-      state.kw.groups.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id))
-      renderKeywords()
-      await api('/api/groups/order', { ids })
-    } else if (drop.merge) {
-      const a = state.kw.list.find((k) => k.id === drop.merge)
-      const b = state.kw.list.find((k) => k.id === drag.id)
-      const name = prompt(`Make a group with “${a.query}” and “${b.query}”? Name it:`)?.trim()
-      if (name) await api('/api/groups/create', { name, keywordIds: [drop.merge, drag.id] })
-    } else {
-      const container = drop.container
-      const to = Number(container?.dataset.dropGroup ?? drop.box?.dataset.groupBox) || null
-      const order = container ? chipIds(container).filter((id) => id !== drag.id) : []
-      if (drop.chip) order.splice(order.indexOf(Number(drop.chip.dataset.kw)) + (drop.after ? 1 : 0), 0, drag.id)
-      else order.push(drag.id)
-      // Show the result right away; saving it recounts every match, which takes a moment
-      const keepInFrom = copy && to
-      const from = state.kw.groups.find((g) => g.id === drag.from)
-      if (from && from.id !== to && !keepInFrom) from.keywordIds = from.keywordIds.filter((id) => id !== drag.id)
-      const toGroup = state.kw.groups.find((g) => g.id === to)
-      if (toGroup) toGroup.keywordIds = order
-      else state.kw.list.sort((a, b) => (order.indexOf(a.id) + 1 || 1e9) - (order.indexOf(b.id) + 1 || 1e9))
-      renderKeywords()
-      if (!to && !drag.from) await api('/api/keywords/order', { ids: order })
-      // Between groups a drag moves the tag, unless Option is held to keep it in both
-      else await api('/api/groups/move', { keywordId: drag.id, from: copy && to ? null : drag.from, to, order })
-      if (copy && to && drag.from && to !== drag.from) toast('Now in both groups')
-    }
+    await saveToGroupByName([...state.kw.selected])
   } catch (err) {
     toast(err.message)
   }
-  await refreshKeywordView()
 })
 
-kwList.addEventListener('dragend', () => {
-  if (!kwDrag) return
-  kwDrag = null
-  clearDropMarks()
-  renderKeywords()
+// Double-click a keyword to change what it searches for, right there in its chip
+$('#kwList').addEventListener('dblclick', (e) => {
+  const name = e.target.closest('.kw-name')
+  if (!name) return
+  const chip = name.closest('[data-kw]')
+  const k = state.kw.list.find((x) => x.id === Number(chip.dataset.kw))
+  if (!k) return
+  e.preventDefault()
+  // The two clicks of a double-click toggled the selection twice; leave it as it was
+  const input = Object.assign(document.createElement('input'), { type: 'text', value: k.query, className: 'kw-edit', maxLength: 200 })
+  input.size = Math.max(8, k.query.length + 2)
+  name.replaceWith(input)
+  input.focus()
+  input.select()
+  let done = false
+  const finish = async (save) => {
+    if (done) return
+    done = true
+    const query = input.value.trim()
+    if (!save || !query || query === k.query) return renderKeywords()
+    try {
+      const r = await api('/api/keywords/rename', { id: k.id, query })
+      toast(`Now searching for ${r.query}…`)
+      await refreshKeywordView()
+    } catch (err) {
+      toast(err.message)
+      renderKeywords()
+    }
+  }
+  input.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') finish(true)
+    if (ev.key === 'Escape') finish(false)
+  })
+  input.addEventListener('blur', () => finish(true))
 })
 
 async function loadKeywords() {
@@ -733,13 +687,23 @@ async function loadKeywords() {
 $('#kwForm').addEventListener('submit', async (e) => {
   e.preventDefault()
   const input = $('#kwInput')
-  const query = input.value.trim()
-  if (!query) return
+  const queries = input.value.split(/[\n,]+/).map((t) => t.trim()).filter(Boolean)
+  if (!queries.length) return
+  const pick = $('#kwGroup').value
+  let groupName = null
+  if (pick === 'new') {
+    groupName = prompt('Name the new group (for example, UK Athletics):')?.trim()
+    if (!groupName) return
+  }
   try {
-    await api('/api/keywords/add', { query })
+    const r = await api('/api/keywords/addMany', { queries, ...(pick === 'new' ? { groupName } : pick ? { groupId: Number(pick) } : {}) })
     input.value = ''
-    toast(`Searching the last ${state.kw.hours} hours for "${query}"…`)
     await loadKeywords()
+    const group = r.groupId ? state.kw.groups.find((g) => g.id === r.groupId) : null
+    if (group) $('#kwGroup').value = String(group.id)
+    const parts = [r.created.length ? `Searching the last ${state.kw.hours} hours for ${r.created.length} new keyword${r.created.length === 1 ? '' : 's'}` : 'Nothing new to search']
+    if (r.existed) parts.push(`${r.existed} you already had`)
+    toast(parts.join(', ') + (group ? ` — saved to “${group.name}”` : '') + '.')
   } catch (err) {
     toast(err.message)
   }
@@ -766,7 +730,7 @@ $('#kwList').addEventListener('click', async (e) => {
         renderKeywords()
         return loadFeed(true)
       case 'ungroup':
-        await api('/api/groups/move', { keywordId: id, from: btn.closest('[data-kw]').dataset.group })
+        await api('/api/groups/takeOut', { keywordId: id, groupId: Number(btn.closest('[data-kw]').dataset.group) })
         toast(`Took “${k.query}” out of the group`)
         break
       case 'toggle':
@@ -806,11 +770,8 @@ function renderVerdicts(item) {
     .map((v) => {
       const k = state.kw.list.find((x) => x.id === v.id)
       if (!k) return ''
-      // In a group view, or when a group's rules hid the post, the button applies to that group
-      const groupId = state.kw.group || (!v.kept && v.groupId) || null
-      const groupName = groupId ? state.kw.groups.find((g) => g.id === groupId)?.name : null
-      const scope = groupName ?? k.query
-      const attrs = `data-kw-id="${k.id}" ${groupId ? `data-group-id="${groupId}"` : ''} data-scope="${esc(scope)}" data-did="${esc(did)}" data-handle="${esc(handle)}"`
+      const scope = k.query
+      const attrs = `data-kw-id="${k.id}" data-scope="${esc(scope)}" data-did="${esc(did)}" data-handle="${esc(handle)}"`
       const btn = v.kept
         ? `<button class="link-btn bad" data-kwauthor="blocked" ${attrs} title="Hide posts by @${esc(handle)} from “${esc(scope)}”">Not about ${esc(scope)}? Never show @${esc(handle)}</button>`
         : `<button class="link-btn" data-kwauthor="trusted" ${attrs} title="Always show posts by @${esc(handle)} for “${esc(scope)}”">Always show @${esc(handle)} here</button>`
@@ -824,9 +785,8 @@ function renderVerdicts(item) {
 document.addEventListener('click', async (e) => {
   const b = e.target.closest('[data-kwauthor]')
   if (!b) return
-  const groupId = Number(b.dataset.groupId) || null
-  const id = groupId ?? Number(b.dataset.kwId)
-  const url = groupId ? '/api/groups/author' : '/api/keywords/author'
+  const id = Number(b.dataset.kwId)
+  const url = '/api/keywords/author'
   const scope = b.dataset.scope
   const verdict = b.dataset.kwauthor
   b.disabled = true
@@ -853,17 +813,16 @@ $('#showHidden').addEventListener('change', (e) => {
   loadFeed(true)
 })
 
+// ⚙ on a keyword: what it searches for, and what it should mean (its context rules)
 async function openRules(k) {
   const dlg = $('#actionDialog')
   const body = $('#adBody')
-  const label = k.isGroup ? k.name : k.query
-  const base = k.isGroup ? '/api/groups' : '/api/keywords'
-  $('#adTitle').textContent = k.isGroup ? `Edit group “${label}”` : `What should “${label}” mean?`
+  $('#adTitle').textContent = `Edit “${k.query}”`
   body.innerHTML = '<div class="dim">Loading…</div>'
   dlg.showModal()
   let r
   try {
-    r = await api(`${base}/rules?id=${k.id}`)
+    r = await api(`/api/keywords/rules?id=${k.id}`)
   } catch (err) {
     body.innerHTML = `<div class="error">${esc(err.message)}</div>`
     return
@@ -876,31 +835,17 @@ async function openRules(k) {
         <div class="people">${r.suggested.map((p) => `<span class="person"><span data-profile="${esc(p.did)}">@${esc(p.handle)}</span> <span class="dim">(${p.kept})</span>
           <button class="link-btn" data-rule-trust="${esc(p.did)}">Always show</button></span>`).join('')}</div></div>`
     : ''
-  const checks = (items, checked, name) => `<div class="rules-checks">${items.map((x) => `<label class="chip"><input type="checkbox" name="${name}" value="${x.id}" ${checked.includes(x.id) ? 'checked' : ''}> ${esc(x.label)}</label>`).join('')}</div>`
-  const groupBits = k.isGroup
-    ? `<label class="rules-block"><b>Group name</b><input id="groupName" type="text" maxlength="60" value="${esc(r.name)}"></label>
-       <label class="rules-block"><b>Topic words</b><small>Each word, #hashtag or "exact phrase" is searched on Bluesky every 2 minutes, and its posts show in this group. Separate them with commas or new lines.</small>
-         <textarea id="topicWords" rows="3">${esc(r.topics.map((t) => t.query).join(', '))}</textarea></label>
-       <div class="rules-block" id="vagueBlock"><b>Vague words</b><small>Tick words that mean other things too, like UK or wildcats. Their posts only show if they also mention another topic word or a context word.</small>
-         <div class="rules-checks" id="topicFlags"></div></div>
-       <div class="group-warn" id="groupWarn" hidden></div>`
-    : ''
-  const memberOf = !k.isGroup && state.kw.groups.length
-    ? `<div class="rules-block"><b>Groups</b><small>A keyword can be in several, each with its own rules.</small>
-         ${checks(state.kw.groups.map((g) => ({ id: g.id, label: g.name })), r.groupIds, 'group')}</div>`
+  const memberOf = state.kw.groups.length
+    ? `<div class="rules-block"><b>Groups</b><small>A keyword can be in several.</small>
+         <div class="rules-checks">${state.kw.groups.map((g) => `<label class="chip"><input type="checkbox" name="group" value="${g.id}" ${r.groupIds.includes(g.id) ? 'checked' : ''}> ${esc(g.name)}</label>`).join('')}</div></div>`
     : ''
   body.innerHTML = `
-    ${groupBits}
-    <p class="dim rules-intro">${k.isGroup
-      ? 'The rules below apply on top of each topic word’s own rules.'
-      : `Posts matching “${esc(label)}” are shown only if they mention one of the first list and none of the second.`}
+    <label class="rules-block"><b>Search for</b><small>Changing this clears its matches and searches the last ${state.kw.hours} hours again. Words with spaces are searched as an exact phrase.</small>
+      <input id="kwQuery" type="text" maxlength="200" value="${esc(k.query)}"></label>
+    <p class="dim rules-intro">Posts matching it are shown only if they mention one of the first list and none of the second.
       Separate words with commas or new lines. Words in ALL CAPS (like UK or SEC) must match exactly; others ignore case.</p>
-    ${k.isGroup
-      ? `<div class="rules-block"><label for="rulesMust"><b>Context words</b></label><small>Not searched. A post with a vague word shows if it mentions one of these. <span id="contextUnused" hidden>No topic words are ticked as vague, so these aren’t used right now.</span></small>
-          <textarea id="rulesMust" rows="3">${esc(r.must.join(', '))}</textarea>
-          <button type="button" class="link-btn" id="moveToTopics" hidden>Move these to topic words, so they’re searched too</button></div>`
-      : `<label class="rules-block"><b>Must mention one of</b><small>Leave empty to keep every match</small>
-          <textarea id="rulesMust" rows="4">${esc(r.must.join(', '))}</textarea></label>`}
+    <label class="rules-block"><b>Must mention one of</b><small>Leave empty to keep every match</small>
+      <textarea id="rulesMust" rows="4">${esc(r.must.join(', '))}</textarea></label>
     <label class="rules-block"><b>Hide if it mentions</b>
       <textarea id="rulesExclude" rows="4">${esc(r.exclude.join(', '))}</textarea></label>
     <div class="rules-block"><b>Always show these accounts</b><div class="people">${people(r.trusted, 'trusted')}</div></div>
@@ -910,78 +855,72 @@ async function openRules(k) {
     <div class="ad-foot"><button class="secondary" data-close>Cancel</button><button class="primary" id="rulesSave">Save</button></div>`
 
   body.querySelectorAll('[data-rule-person]').forEach((x) => (x.onclick = async () => {
-    await api(`${base}/author`, { id: k.id, did: x.dataset.rulePerson, verdict: null })
+    await api('/api/keywords/author', { id: k.id, did: x.dataset.rulePerson, verdict: null })
     x.closest('.person').remove()
     refreshKeywordView()
   }))
   body.querySelectorAll('[data-rule-trust]').forEach((x) => (x.onclick = async () => {
-    await api(`${base}/author`, { id: k.id, did: x.dataset.ruleTrust, verdict: 'trusted' })
+    await api('/api/keywords/author', { id: k.id, did: x.dataset.ruleTrust, verdict: 'trusted' })
     x.replaceWith(Object.assign(document.createElement('span'), { className: 'dim', textContent: 'added' }))
     refreshKeywordView()
   }))
-  const ticked = (name) => [...body.querySelectorAll(`input[name="${name}"]:checked`)].map((i) => Number(i.value))
-  // Topic words: the textarea holds the words; the vague ticks follow it as it's edited
-  const vague = new Map((r.topics ?? []).map((t) => [t.query.toLowerCase(), t.needsContext]))
-  // "Big Blue Nation" and Big Blue Nation are the same topic word for spotting duplicates
-  const topicKey = (t) => t.replace(/["“”]/g, '').trim().toLowerCase()
-  const topicList = () => {
-    const seen = new Set()
-    return $('#topicWords').value.split(/[\n,]+/).map((t) => t.trim()).filter((t) => t && !seen.has(topicKey(t)) && seen.add(topicKey(t)))
+  $('#rulesSave').onclick = async () => {
+    try {
+      const query = $('#kwQuery').value.trim()
+      let renamed = null
+      if (query && query !== k.query) renamed = (await api('/api/keywords/rename', { id: k.id, query })).query
+      const groupIds = [...body.querySelectorAll('input[name="group"]:checked')].map((i) => Number(i.value))
+      await api('/api/keywords/rules', { id: k.id, must: $('#rulesMust').value, exclude: $('#rulesExclude').value, ...(state.kw.groups.length ? { groupIds } : {}) })
+      dlg.close()
+      toast(renamed ? `Now searching for ${renamed}…` : `Saved “${k.query}”`)
+      refreshKeywordView()
+    } catch (err) {
+      toast(err.message)
+    }
   }
-  const renderTopics = () => {
-    const words = topicList()
-    const known = new Map(state.kw.list.map((x) => [x.query.toLowerCase(), x]))
-    $('#vagueBlock').hidden = !words.length
-    $('#topicFlags').innerHTML = words.map((w) => {
-      const kw = known.get(w.toLowerCase())
-      const note = !kw ? ' (new)' : kw.enabled ? '' : ' (paused)'
-      return `<label class="chip"><input type="checkbox" data-vague="${esc(w.toLowerCase())}" ${vague.get(w.toLowerCase()) ? 'checked' : ''}> ${esc(w)}<span class="dim">${note}</span></label>`
-    }).join('')
-    const anyVague = words.some((w) => vague.get(w.toLowerCase()))
-    const hasContext = $('#rulesMust').value.trim() !== ''
-    $('#contextUnused').hidden = !hasContext || anyVague
-    $('#moveToTopics').hidden = !hasContext
-    // New words will be searched, so only words that already exist can be paused
+}
+
+// ⚙ on a group: its name and its keywords, one per line
+async function openGroup(id) {
+  const dlg = $('#actionDialog')
+  const body = $('#adBody')
+  body.innerHTML = '<div class="dim">Loading…</div>'
+  dlg.showModal()
+  let g
+  try {
+    g = await api(`/api/groups/get?id=${id}`)
+  } catch (err) {
+    body.innerHTML = `<div class="error">${esc(err.message)}</div>`
+    return
+  }
+  $('#adTitle').textContent = `Edit group “${g.name}”`
+  body.innerHTML = `
+    <label class="rules-block"><b>Group name</b><input id="groupName" type="text" maxlength="60" value="${esc(g.name)}"></label>
+    <label class="rules-block"><b>Keywords</b><small>One per line (or separated by commas). New ones are searched straight away. Removing one takes it out of this group; it’s deleted only if you typed it here and it’s in no other group.</small>
+      <textarea id="groupQueries" rows="8">${esc(g.keywords.map((k) => k.query).join('\n'))}</textarea></label>
+    <div class="group-warn" id="groupWarn" hidden></div>
+    <div class="ad-foot"><button class="secondary" data-close>Cancel</button><button class="primary" id="groupSave">Save</button></div>`
+  const queries = () => $('#groupQueries').value.split(/[\n,]+/).map((t) => t.trim()).filter(Boolean)
+  const known = new Map(state.kw.list.map((x) => [x.query.toLowerCase(), x]))
+  const update = () => {
+    const words = queries()
     const problem = !words.length
-      ? 'This group has no topic words, so it can’t find any posts. Add at least one above.'
+      ? 'This group has no keywords, so it won’t show any posts.'
       : words.every((w) => known.get(w.toLowerCase()) && !known.get(w.toLowerCase()).enabled)
-        ? `Every topic word here is paused, so no new posts are coming in. Resume ${words.length === 1 ? 'it' : 'one'} with ▶ after saving.`
+        ? 'Every keyword here is paused, so no new posts are coming in. Resume the group with ▶ after saving.'
         : null
     $('#groupWarn').hidden = !problem
     $('#groupWarn').textContent = problem ?? ''
   }
-  if (k.isGroup) {
-    $('#topicWords').addEventListener('input', renderTopics)
-    $('#rulesMust').addEventListener('input', renderTopics)
-    $('#topicFlags').addEventListener('change', (e) => {
-      if (e.target.dataset.vague) vague.set(e.target.dataset.vague, e.target.checked)
-      renderTopics()
-    })
-    $('#moveToTopics').onclick = () => {
-      // Context words are whole phrases; as searches they need quotes, or Bluesky looks for the words anywhere
-      const moved = $('#rulesMust').value.split(/[\n,]+/).map((t) => t.trim()).filter(Boolean)
-        .map((t) => (/\s/.test(t) && !/^["“]/.test(t) ? `"${t}"` : t))
-      $('#topicWords').value = [...topicList(), ...moved].join(', ')
-      $('#topicWords').value = topicList().join(', ')
-      $('#rulesMust').value = ''
-      renderTopics()
-      toast('Moved. Tick any vague words, like UK, then Save.')
-    }
-    renderTopics()
-  }
-  $('#rulesSave').onclick = async () => {
-    let searching = null
+  $('#groupQueries').addEventListener('input', update)
+  update()
+  $('#groupSave').onclick = async () => {
     try {
-      const rules = { id: k.id, must: $('#rulesMust').value, exclude: $('#rulesExclude').value }
-      if (k.isGroup) {
-        const topics = topicList().map((query) => ({ query, needsContext: !!vague.get(query.toLowerCase()) }))
-        const { created } = await api('/api/groups/update', { ...rules, name: $('#groupName').value, topics })
-        if (created?.length) searching = `Searching the last ${state.kw.hours} hours for ${created.length} new topic word${created.length === 1 ? '' : 's'}…`
-      } else {
-        await api('/api/keywords/rules', { ...rules, ...(state.kw.groups.length ? { groupIds: ticked('group') } : {}) })
-      }
+      const { created } = await api('/api/groups/update', { id, name: $('#groupName').value, queries: queries() })
       dlg.close()
-      toast(searching ?? `Saved “${k.isGroup ? $('#groupName').value.trim() : label}”`)
+      toast(created?.length
+        ? `Searching the last ${state.kw.hours} hours for ${created.length} new keyword${created.length === 1 ? '' : 's'}…`
+        : `Saved “${$('#groupName').value.trim()}”`)
       refreshKeywordView()
     } catch (err) {
       toast(err.message)
