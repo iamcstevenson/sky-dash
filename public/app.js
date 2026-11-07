@@ -315,9 +315,13 @@ const VIEWS = {
     }),
     done: () => `That's every match from the last ${state.kw.hours} hours.`,
     empty: () => state.kw.list.length
-      ? (state.kw.polling ? 'Searching…' : state.kw.showHidden ? 'Nothing was hidden by your context rules.' : `No matches in the last ${state.kw.hours} hours.`)
+      ? (viewedGroupProblem() ?? (state.kw.polling ? 'Searching…' : state.kw.showHidden ? 'Nothing was hidden by your context rules.' : `No matches in the last ${state.kw.hours} hours.`))
       : 'Add a keyword above to start.',
   },
+}
+function viewedGroupProblem() {
+  const g = state.kw.group && state.kw.groups.find((x) => x.id === state.kw.group)
+  return g ? groupProblem(g.keywordIds) : null
 }
 VIEWS.trending = {
   feed: '/api/trending/posts',
@@ -466,6 +470,14 @@ document.querySelectorAll('.tab[data-tab]').forEach((t) => t.addEventListener('c
 
 // ---------- keywords ----------
 
+// Why a group can't find new posts, or null. Group rules only filter what its keywords collect.
+function groupProblem(keywordIds) {
+  const members = keywordIds.map((id) => state.kw.list.find((k) => k.id === id)).filter(Boolean)
+  if (!members.length) return 'This group has no keywords, so it can’t find any posts. Its rules only filter posts that its keywords collect. Tick at least one keyword.'
+  if (members.every((k) => !k.enabled)) return `Every keyword in this group is paused, so no new posts are coming in. Resume ${members.length === 1 ? 'it' : 'one'} with ▶.`
+  return null
+}
+
 function keywordChip(k, groupId) {
   const status = k.error
     ? `<span class="warn" title="${esc(k.error)}">⚠</span>`
@@ -507,6 +519,7 @@ function renderKeywords() {
           <button data-grp="remove" title="Delete this group (keeps its keywords)">✕</button>
         </span>
       </header>
+      ${!isCollapsed && members.length && groupProblem(g.keywordIds) ? `<div class="group-warn">${esc(groupProblem(g.keywordIds))}</div>` : ''}
       ${isCollapsed ? '' : `<div class="kw-group-tags" data-drop-group="${g.id}">${members.map((k) => keywordChip(k, g.id)).join('') || '<span class="kw-empty">Drag keywords here, or add them with ⚙.</span>'}</div>`}
     </section>`
   }).join('')
@@ -866,7 +879,8 @@ async function openRules(k) {
   const groupBits = k.isGroup
     ? `<label class="rules-block"><b>Group name</b><input id="groupName" type="text" maxlength="60" value="${esc(r.name)}"></label>
        <div class="rules-block"><b>Keywords in this group</b><small>A keyword can be in several groups. Unticking one keeps the keyword.</small>
-         ${checks(state.kw.list.map((x) => ({ id: x.id, label: x.query })), r.keywordIds, 'member')}</div>`
+         ${checks(state.kw.list.map((x) => ({ id: x.id, label: x.query + (x.enabled ? '' : ' (paused)') })), r.keywordIds, 'member')}
+         <div class="group-warn" id="groupWarn" hidden></div></div>`
     : ''
   const memberOf = !k.isGroup && state.kw.groups.length
     ? `<div class="rules-block"><b>Groups</b><small>A keyword can be in several, each with its own rules.</small>
@@ -899,6 +913,16 @@ async function openRules(k) {
     refreshKeywordView()
   }))
   const ticked = (name) => [...body.querySelectorAll(`input[name="${name}"]:checked`)].map((i) => Number(i.value))
+  if (k.isGroup) {
+    const warn = $('#groupWarn')
+    const update = () => {
+      const problem = groupProblem(ticked('member'))
+      warn.hidden = !problem
+      warn.textContent = problem ?? ''
+    }
+    body.querySelectorAll('input[name="member"]').forEach((i) => i.addEventListener('change', update))
+    update()
+  }
   $('#rulesSave').onclick = async () => {
     try {
       const rules = { id: k.id, must: $('#rulesMust').value, exclude: $('#rulesExclude').value }
