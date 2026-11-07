@@ -37,3 +37,6 @@ Rather than exposing the dashboard to the phone, Hub Agent on the Mac reads read
 
 ### 12. Work through branches and pull requests (November 2026)
 `main` always works; features go on branches merged by PR. Backlog belongs in GitHub Issues.
+
+### 13. Groups are one list of topic words (November 2026)
+Groups had keywords (searched) and "Must mention one of" (a filter on what the keywords found). For a topic, most words are specific enough to search, so the same words were typed twice, and an empty keyword list silently showed nothing. Now every word in a group is a searched topic word that also counts as context; vague ones (UK, wildcats) are ticked and need another unticked topic word or a context word. Considered: an "also search these" switch, or just renaming the two boxes; both kept the double list. Existing groups were migrated by marking their keywords vague, which gives identical results (checked on all stored matches). Words typed into a group editor skip the ready-made keyword rules, since the group defines their meaning, and are deleted when removed from their last group. Hub keeps sending `keywordIds`/`must`, which still work; `must` now means context words. Issue #10.

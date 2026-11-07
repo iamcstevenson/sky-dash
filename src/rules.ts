@@ -6,9 +6,11 @@
 //   4. no "must mention" words set                  -> kept
 //   5. mentions one of the "must mention" words     -> kept
 //   6. otherwise                                    -> hidden (no context)
+// In a group, every keyword is a topic word and passes on its own unless marked as needing context;
+// see judgeGroupWords.
 // Words match whole words, ignoring case, except words written in ALL CAPS ("UK", "SEC", "STL"),
 // which must match exactly so "uk" in a URL or "sec" in "30 sec" don't count.
-import { db } from './db.ts'
+import { db, kvGet, kvSet } from './db.ts'
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS keyword_authors (
@@ -45,6 +47,24 @@ db.exec(`
 for (const col of ['must_terms', 'exclude_terms', 'position']) {
   const cols = db.prepare('PRAGMA table_info(keywords)').all() as { name: string }[]
   if (!cols.some((c) => c.name === col)) db.exec(`ALTER TABLE keywords ADD COLUMN ${col} ${col === 'position' ? 'INTEGER' : 'TEXT'}`)
+}
+
+// Topic words (issue #10): every keyword in a group is one of its topic words. needs_context marks vague ones,
+// whose posts need another topic word or a context word. group_made marks keywords typed into a group editor,
+// which are deleted when taken out of their last group.
+function addColumn(table: string, col: string, type: string) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
+  if (!cols.some((c) => c.name === col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`)
+}
+addColumn('keyword_group_members', 'needs_context', 'INTEGER NOT NULL DEFAULT 0')
+addColumn('keywords', 'group_made', 'INTEGER NOT NULL DEFAULT 0')
+
+// Before topic words, a group's must-mention words applied to all its keywords. Marking those keywords
+// as needing context keeps every existing group showing exactly what it did.
+if (!kvGet('topic_words_migrated')) {
+  db.exec(`UPDATE keyword_group_members SET needs_context = 1 WHERE group_id IN (
+    SELECT id FROM keyword_groups WHERE must_terms IS NOT NULL AND must_terms != '[]')`)
+  kvSet('topic_words_migrated', '1')
 }
 
 // ---------- ready-made rules ----------
@@ -154,6 +174,11 @@ export function setAuthor(id: number, did: string, verdict: 'trusted' | 'blocked
   cache.delete(id)
 }
 
+// Drops one keyword's cached rules after they're changed directly in the database
+export function forgetRuleCache(id: number) {
+  cache.delete(id)
+}
+
 export function forgetRules(id: number) {
   db.prepare('DELETE FROM keyword_authors WHERE keyword_id = ?').run(id)
   db.prepare('DELETE FROM keyword_group_members WHERE keyword_id = ?').run(id)
@@ -214,8 +239,20 @@ export function rulesFor(id: number): Rules {
   return rules
 }
 
-// Group rules work the same way as a keyword's, and are read the same way
-type GroupRules = Rules & { name: string }
+// The words a search query is about, for use as context: "quoted phrases", and the rest of the query
+// as one phrase (Bluesky searches unquoted words together), minus operators like lang:en or -word.
+export function queryTerms(query: string): string[] {
+  const terms: string[] = []
+  const rest = query.replace(/["“]([^"”]+)["”]/g, (_, phrase: string) => (terms.push(phrase.trim()), ' '))
+  const words = rest.split(/\s+/).filter((w) => w && !w.startsWith('-') && !w.includes(':') && !/^(AND|NOT)$/.test(w))
+  if (words.includes('OR')) terms.push(...words.filter((w) => w !== 'OR'))
+  else if (words.length) terms.push(words.join(' '))
+  return terms.filter(Boolean)
+}
+
+// Group rules. `must` holds the group's context words, kept under that name for Hub and older callers.
+// A topic word marked needs_context passes on a context word or on any topic word that stands on its own.
+type GroupRules = Rules & { name: string; needsContext: Set<number>; contextRe: RegExp | null }
 const groupCache = new Map<number, GroupRules>()
 let groupsByKeyword: Map<number, number[]> | null = null
 
@@ -240,7 +277,22 @@ export function groupRulesFor(id: number): GroupRules {
   }[]) {
     ;(a.verdict === 'trusted' ? trusted : blocked).add(a.author_did)
   }
-  const rules = { name: row?.name ?? '', must, exclude, mustRe: compile(must), excludeRe: exclude.map((t) => compile([t]) ?? NEVER), trusted, blocked }
+  const members = db
+    .prepare('SELECT k.id, k.query, m.needs_context FROM keyword_group_members m JOIN keywords k ON k.id = m.keyword_id WHERE m.group_id = ?')
+    .all(id) as { id: number; query: string; needs_context: number }[]
+  const needsContext = new Set(members.filter((m) => m.needs_context).map((m) => m.id))
+  const standAlone = members.filter((m) => !m.needs_context).flatMap((m) => queryTerms(m.query))
+  const rules: GroupRules = {
+    name: row?.name ?? '',
+    must,
+    exclude,
+    mustRe: compile(must),
+    excludeRe: exclude.map((t) => compile([t]) ?? NEVER),
+    trusted,
+    blocked,
+    needsContext,
+    contextRe: compile([...must, ...standAlone]),
+  }
   groupCache.set(id, rules)
   return rules
 }
@@ -293,6 +345,19 @@ function judgeWords(r: Rules, text: string): { kept: boolean; reason: string } {
   return { kept: false, reason: 'No context words' }
 }
 
+// A group's word rules for one of its topic words: hide words always apply; a vague (needs context)
+// topic word also needs a context word or another topic word that stands on its own.
+// reason is undefined when nothing in the group decided it, so the keyword's own reason is shown.
+function judgeGroupWords(gr: GroupRules, id: number, text: string): { kept: boolean; reason?: string } {
+  for (let i = 0; i < gr.excludeRe.length; i++) {
+    if (gr.excludeRe[i].test(text)) return { kept: false, reason: `Mentions “${gr.exclude[i]}”` }
+  }
+  if (!gr.needsContext.has(id)) return { kept: true }
+  const m = gr.contextRe && text.match(gr.contextRe)
+  if (m) return { kept: true, reason: `Mentions “${m[0].trim()}”` }
+  return { kept: false, reason: 'Vague word with no other topic word or context word' }
+}
+
 // Whether a post that matched keyword `id` should show. Viewing a group applies that group's rules.
 // Otherwise a keyword in groups needs to pass at least one of them, since each group gives it a meaning.
 // An account you've marked for the keyword or group decides it, whatever the words say.
@@ -315,8 +380,8 @@ export function judge(id: number, authorDid: string, text: string, viewingGroup:
       firstHidden ??= { id, kept: false, reason: `You hid this account in ${gr.name}`, ...tag }
       continue
     }
-    const words = judgeWords(gr, text)
-    if (words.kept) passedGroup ??= { id, kept: true, reason: gr.mustRe ? words.reason : own.reason, ...tag }
+    const words = judgeGroupWords(gr, id, text)
+    if (words.kept) passedGroup ??= { id, kept: true, reason: words.reason ?? own.reason, ...tag }
     else firstHidden ??= { id, kept: false, reason: `${gr.name}: ${words.reason}`, ...tag }
   }
   if (!own.kept) return { id, ...own }

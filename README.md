@@ -115,14 +115,17 @@ The tab shows one account at a time, following whichever account you're acting a
 - **Hide people I follow** shows only accounts you don't follow yet.
 - Very common words are capped at the newest 2,000 matches per check (shown as "2,000+").
 
-**Groups** collect related keywords, like a "UK Basketball" group of `wildcats`, `bbn`, `basketball` and `cbb`:
+**Groups** are topics defined by one list of **topic words**, like a "UK Athletics" group of `"Big Blue Nation"`, `#BBN`, `"Rupp Arena"`, `UK` and `wildcats`:
 
-- Click **+ New group**, or drag one loose keyword onto the middle of another. Drag keywords to reorder them or move them between groups, and hold Option to keep one in both. ⚙ on a group or keyword does the same with checkboxes, which also works on phones.
-- Click a group's name to see posts from all its keywords, with each post listed once. Clicking a keyword inside a group narrows that view.
-- A group has its own context rules on top of each keyword's. Set "Kentucky, BBN, Rupp" once and `basketball` narrows to Kentucky within that group. A post must pass both, unless you've marked its account **Always show**.
+- Click **+ New group**, then type its topic words in ⚙. Each topic word is a keyword: it's searched every 2 minutes and its posts show in the group. You can also drag loose keywords into a group, and hold Option to keep one in two groups.
+- **Vague words:** tick topic words that mean other things too, like `UK` or `wildcats` (marked **?** in the group). Their posts only show if they also mention another topic word that isn't ticked, or one of the group's **context words**. Keep the unticked words specific: a broad one like `cfb` lets a vague word through for any team.
+- **Context words** aren't searched; they only vouch for vague words. **Move these to topic words** turns them into searched topic words in one click, quoting phrases for you.
+- **Hide if it mentions** and **Always/Never show** accounts work as before, and each keyword's own rules still apply on top.
+- Click a group's name to see posts from all its topic words, with each post listed once. Clicking one inside the group narrows that view.
 - A keyword can be in several groups, each giving it a different meaning. In the overall view, a post shows if it passes at least one of them.
-- Pausing a group or changing its 📡 applies to all its keywords, including where they're also in other groups.
-- Removing a group, or taking a keyword out of one, never deletes the keyword. ✕ on a keyword does.
+- Pausing a group or changing its 📡 applies to all its topic words, including where they're also in other groups.
+- Removing a topic word in ⚙ deletes it if it was typed into a group and isn't in another one; any other keyword is only taken out of the group. Removing a group never deletes keywords.
+- The group shows a warning when it has no topic words, or all of them are paused.
 
 **Context rules** say what a keyword should mean. Click **⚙** on a keyword:
 
