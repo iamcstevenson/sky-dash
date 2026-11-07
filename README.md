@@ -109,23 +109,22 @@ The tab shows one account at a time, following whichever account you're acting a
 
 ### Keywords
 
-- Add keywords, #hashtags or "exact phrases". Each is searched across all of Bluesky every 2 minutes, and the last 48 hours of matches are shown.
+- Add keywords, #hashtags or phrases. Each is searched across all of Bluesky every 2 minutes, and the last 48 hours of matches are shown.
+- Words with spaces are searched as an exact phrase: `Big Blue Nation` is saved as `"Big Blue Nation"` (without quotes, Bluesky finds the words anywhere in a post). Anything using search syntax is kept as typed.
+- Double-click a keyword to change what it searches for (Enter saves, Esc cancels), or use the **Search for** field in its ⚙ on a phone. Its old matches are cleared and the last 48 hours are searched again; its rules, groups, pause and 📡 stay.
 - Bluesky search syntax works too: `lang:en`, `-word` to exclude, `from:handle`.
 - Click a keyword to show only its posts. ❚❚ pauses it, ✕ removes it, and 📡 controls whether it's in your custom Bluesky feed.
 - **Hide people I follow** shows only accounts you don't follow yet.
 - Very common words are capped at the newest 2,000 matches per check (shown as "2,000+").
 
-**Groups** are topics defined by one list of **topic words**, like a "UK Athletics" group of `"Big Blue Nation"`, `#BBN`, `"Rupp Arena"`, `UK` and `wildcats`:
+**Groups** are named, saved sets of keywords, like "UK Athletics":
 
-- Click **+ New group**, then type its topic words in ⚙. Each topic word is a keyword: it's searched every 2 minutes and its posts show in the group. You can also drag loose keywords into a group, and hold Option to keep one in two groups.
-- **Vague words:** tick topic words that mean other things too, like `UK` or `wildcats` (marked **?** in the group). Their posts only show if they also mention another topic word that isn't ticked, or one of the group's **context words**. Keep the unticked words specific: a broad one like `cfb` lets a vague word through for any team.
-- **Context words** aren't searched; they only vouch for vague words. **Move these to topic words** turns them into searched topic words in one click, quoting phrases for you.
-- **Hide if it mentions** and **Always/Never show** accounts work as before, and each keyword's own rules still apply on top.
-- Click a group's name to see posts from all its topic words, with each post listed once. Clicking one inside the group narrows that view.
-- A keyword can be in several groups, each giving it a different meaning. In the overall view, a post shows if it passes at least one of them.
-- Pausing a group or changing its 📡 applies to all its topic words, including where they're also in other groups.
-- Removing a topic word in ⚙ deletes it if it was typed into a group and isn't in another one; any other keyword is only taken out of the group. Removing a group never deletes keywords.
-- The group shows a warning when it has no topic words, or all of them are paused.
+- Add several keywords at once, separated by commas, and pick a group in **Save to** (or **New group…**) before clicking Add. Keywords you already have are just added to the group.
+- Or click several loose keywords to select them, then **Save as group…**. Typing an existing group's name adds them to it.
+- ⚙ on a group renames it and edits its keywords as a list, one per line. New ones are searched straight away. Removing one takes it out of the group, and deletes it only if you typed it into that group's list and it's in no other group.
+- Click a group's name to see posts from all its keywords, with each post listed once. Clicking a keyword inside the group narrows that view.
+- ❚❚/▶ pauses or resumes the whole group, and 📡 puts all of it in or out of your custom Bluesky feed. Discover and Trending can be filtered by group.
+- Groups have no rules of their own: each keyword's ⚙ rules decide what it shows. Removing a group never deletes its keywords; − on a keyword takes it out of one group.
 
 **Context rules** say what a keyword should mean. Click **⚙** on a keyword:
 

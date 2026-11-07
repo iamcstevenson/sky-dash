@@ -97,7 +97,7 @@ function computeTallies(kw: number | null, keptUris?: Set<string>, group: number
   }[]
   const out = new Map<string, Tally>()
   for (const r of rows) {
-    const { kept } = judgeRow(r, group)
+    const { kept } = judgeRow(r)
     if (!kept.length) continue
     keptUris?.add(r.uri)
     let t = out.get(r.author_did)
