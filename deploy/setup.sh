@@ -10,7 +10,7 @@ if ! command -v node >/dev/null || [ "$(node -p 'process.versions.node.split("."
   curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
   apt-get install -y nodejs
 fi
-apt-get install -y git sqlite3
+apt-get install -y git sqlite3 rclone
 
 id skydash >/dev/null 2>&1 || useradd --system --home-dir /opt/skydash --shell /usr/sbin/nologin skydash
 install -d -o skydash -g skydash -m 750 /var/lib/skydash
@@ -20,7 +20,11 @@ if [ ! -d /opt/skydash/.git ]; then
 fi
 sudo -u skydash bash -c 'cd /opt/skydash && npm ci --omit=dev --no-audit --no-fund --cache /tmp/skydash-npm-cache'
 
-install -m 644 /opt/skydash/deploy/skydash.service /etc/systemd/system/skydash.service
+for unit in skydash.service skydash-backup.service skydash-backup.timer; do
+  install -m 644 "/opt/skydash/deploy/$unit" "/etc/systemd/system/$unit"
+done
 systemctl daemon-reload
 systemctl enable skydash
+systemctl enable --now skydash-backup.timer
 echo "Setup done. Next: create /opt/skydash/.env (owner skydash, mode 600), then: systemctl start skydash"
+echo "Backups need the rclone remotes r2 and skydash-crypt in /root/.config/rclone/rclone.conf (see docs/architecture.md)."

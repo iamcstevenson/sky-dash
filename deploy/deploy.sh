@@ -9,9 +9,16 @@ sudo -u skydash git pull --ff-only --quiet
 after=$(sudo -u skydash git rev-parse --short HEAD)
 sudo -u skydash npm ci --omit=dev --no-audit --no-fund --cache /tmp/skydash-npm-cache --silent
 
-if ! cmp -s deploy/skydash.service /etc/systemd/system/skydash.service; then
-  install -m 644 deploy/skydash.service /etc/systemd/system/skydash.service
+changed=0
+for unit in skydash.service skydash-backup.service skydash-backup.timer; do
+  if ! cmp -s "deploy/$unit" "/etc/systemd/system/$unit"; then
+    install -m 644 "deploy/$unit" "/etc/systemd/system/$unit"
+    changed=1
+  fi
+done
+if [ "$changed" = 1 ]; then
   systemctl daemon-reload
+  systemctl enable --now --quiet skydash-backup.timer
 fi
 systemctl restart skydash
 sleep 5
