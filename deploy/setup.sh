@@ -24,6 +24,7 @@ for unit in skydash.service skydash-backup.service skydash-backup.timer; do
   install -m 644 "/opt/skydash/deploy/$unit" "/etc/systemd/system/$unit"
 done
 systemctl daemon-reload
-systemctl enable skydash skydash-backup.timer
+systemctl enable skydash
+systemctl enable --now skydash-backup.timer
 echo "Setup done. Next: create /opt/skydash/.env (owner skydash, mode 600), then: systemctl start skydash"
 echo "Backups need the rclone remotes r2 and skydash-crypt in /root/.config/rclone/rclone.conf (see docs/architecture.md)."

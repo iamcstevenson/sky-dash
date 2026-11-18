@@ -18,7 +18,7 @@ for unit in skydash.service skydash-backup.service skydash-backup.timer; do
 done
 if [ "$changed" = 1 ]; then
   systemctl daemon-reload
-  systemctl enable --quiet skydash-backup.timer
+  systemctl enable --now --quiet skydash-backup.timer
 fi
 systemctl restart skydash
 sleep 5
