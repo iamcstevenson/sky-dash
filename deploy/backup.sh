@@ -23,6 +23,8 @@ else
   tar -czf "$archive" -C "$WORK" skydash.db
 fi
 
-rclone copy "$archive" "$REMOTE" --s3-no-check-bucket
+# --s3-no-head: R2 checks the upload against its MD5 on arrival; the extra HEAD
+# rclone 1.60 makes afterwards asks for a versionId, which R2 rejects (501).
+rclone copy "$archive" "$REMOTE" --s3-no-check-bucket --s3-no-head
 rclone delete "$REMOTE" --min-age "$KEEP" --s3-no-check-bucket
 echo "Uploaded skydash-$STAMP.tar.gz ($(du -h "$archive" | cut -f1)); kept the last $KEEP."

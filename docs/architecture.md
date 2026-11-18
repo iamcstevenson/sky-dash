@@ -2,7 +2,7 @@
 
 ## Overview
 
-One Node.js process (`src/server.ts`) on the user's Mac, or on a private server (see [Hosting](#hosting-planned-november-2026)). It signs in to both accounts, collects posts into a local SQLite database, and serves a plain HTML/JavaScript page. There's no build step: Node 23.6+ runs the TypeScript files directly, and the page is vanilla JavaScript.
+One Node.js process (`src/server.ts`) on the user's Mac, or on a private server (see [Hosting](#hosting-november-2026)). It signs in to both accounts, collects posts into a local SQLite database, and serves a plain HTML/JavaScript page. There's no build step: Node 23.6+ runs the TypeScript files directly, and the page is vanilla JavaScript.
 
 ```
 Bluesky Jetstream (live) ──┐
@@ -58,7 +58,7 @@ Everything lives in `data/skydash.db` (ignored by git). Main tables:
 | Bluesky video service | Video uploads. | Daily upload limits and email verification per account. |
 | Tailscale (optional) | Private phone access; Funnel for the public feed. | Third-party account needed. |
 
-## Hosting (planned, November 2026)
+## Hosting (November 2026)
 
 Skydash moves from the Mac to one small DigitalOcean server ("droplet"). The code doesn't change: the same process runs under systemd instead of launchd. See decisions #15–#18, the requirements' Cloud hosting section, and issues #14–#19 for the steps.
 
@@ -87,8 +87,8 @@ Bluesky services ◄──┤ skydash.service (Node LTS, user "skydash")    │
 | Settings | `/opt/skydash/.env`, readable only by `skydash`. Adds `ALLOWED_HOSTS=<droplet's Tailscale name>` and the new `FEEDGEN_HOSTNAME`. |
 | Private access | `tailscale serve` publishes the dashboard on the tailnet only. SSH uses a dedicated key (`~/.ssh/skydash_ed25519` on the Mac) and works only over Tailscale. Its Tailscale key expiry must be off (admin console → Machines → skydash → Disable key expiry), or it drops off the tailnet after 180 days. |
 | Public access | None, apart from `tailscale funnel` for the custom feed. The DigitalOcean Cloud Firewall `skydash-fw` has no inbound rules, so it drops all public traffic, and `ufw` on the droplet allows only the `tailscale0` interface and Tailscale's UDP port. Tailscale connects outbound, so it needs no open ports. |
-| Backups | DigitalOcean weekly backups of the whole droplet. A nightly systemd timer runs `sqlite3 .backup`, compresses the copy and uploads it with `rclone` through an encrypted remote to a private Cloudflare R2 bucket, keeping 14 days. The database holds sign-in sessions, so it is never uploaded unencrypted. |
-| Updates | Ubuntu unattended security upgrades. Deploy with `ssh skydash /opt/skydash/deploy/deploy.sh`: it pulls `main`, runs `npm ci`, updates the unit if it changed, restarts and shows the log if the start fails. GitHub Actions can run it later (#19). |
+| Backups | DigitalOcean weekly backups of the whole droplet. Every night at about 10:30 UTC, `skydash-backup.timer` runs `deploy/backup.sh`. It copies the database with `sqlite3 .backup`, checks the copy, packs it with `drafts/`, and uploads it with `rclone` through the encrypted remote `skydash-crypt` (file contents and names) to the private R2 bucket `skydash-backups`, keeping 14 days. The database holds sign-in sessions, so it is never uploaded unencrypted. The `r2` remote uses an R2 token limited to that bucket. The encryption password and salt are in `/root/skydash-secrets/` and in Christian's password manager; without them the backups can't be read. `deploy/restore.sh` downloads the newest backup (or a named one) into a root-only folder and checks it, without touching the live database. Its header lists the steps to put a restore live. Tested November 2026 (#16). |
+| Updates | Ubuntu unattended security upgrades. Deploy with `ssh skydash /opt/skydash/deploy/deploy.sh`: it pulls `main`, runs `npm ci`, updates the units if they changed, restarts and shows the log if the start fails. GitHub Actions can run it later (#19). |
 | Monitoring | DigitalOcean's free monitoring with email alerts for disk over 80% and memory over 90% for 10 minutes; systemd restarts the process if it stops. |
 
 **Moving the data:** stop Skydash on the Mac, copy `data/` (database, WAL and drafts) to the droplet, start the service. Backfill on startup covers the few minutes it was off.

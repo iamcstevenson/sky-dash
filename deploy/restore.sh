@@ -12,7 +12,8 @@ file=${1:-$(rclone lsf "$REMOTE" --s3-no-check-bucket | sort | tail -1)}
 dir=${2:-/var/tmp/skydash-restore}
 [ -n "$file" ] || { echo "No backups found in $REMOTE" >&2; exit 1; }
 
-rm -rf "$dir" && mkdir -p "$dir"
+# The copy holds sign-in sessions, so only root can read it. Delete the folder when done.
+rm -rf "$dir" && mkdir -p -m 700 "$dir"
 rclone copy "$REMOTE/$file" "$dir" --s3-no-check-bucket
 tar -xzf "$dir/$file" -C "$dir" && rm "$dir/$file"
 check=$(sqlite3 "$dir/skydash.db" "PRAGMA quick_check;")
