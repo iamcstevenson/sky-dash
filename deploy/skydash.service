@@ -1,0 +1,30 @@
+# Runs Skydash on a Linux server: starts at boot, restarts if it stops.
+# Installed by deploy/setup.sh to /etc/systemd/system/skydash.service.
+[Unit]
+Description=Skydash dashboard
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=skydash
+Group=skydash
+WorkingDirectory=/opt/skydash
+ExecStart=/usr/bin/node --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/server.ts
+Restart=always
+RestartSec=10
+
+# Sandboxing: Skydash only writes next to its database (DB_PATH, under /var/lib/skydash).
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/skydash
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=multi-user.target
