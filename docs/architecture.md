@@ -82,13 +82,13 @@ Bluesky services ◄──┤ skydash.service (Node LTS, user "skydash")    │
 | --- | --- |
 | Server | Droplet `skydash`: DigitalOcean Basic, 1 vCPU / 1 GB / 25 GB disk plus 1 GB swap, Ubuntu 24.04, San Francisco (SFO2; SFO3 had no 1 GB size). Built November 2026 (#14). Skydash uses about 100 MB of memory and a 550 MB database. Resize to 2 GB when another project moves onto it. |
 | Runtime | Node LTS (24 or newer) from the official Node.js packages. |
-| Process | A systemd unit runs `node --env-file-if-exists=.env src/server.ts` as user `skydash` from `/opt/skydash`, with `Restart=always`, matching the launchd agent. |
+| Process | `deploy/skydash.service` (installed by `deploy/setup.sh`, which rebuilds a server from scratch) runs `node --env-file-if-exists=.env src/server.ts` as user `skydash` from `/opt/skydash`, with `Restart=always`, matching the launchd agent. |
 | Data | `DB_PATH=/var/lib/skydash/skydash.db`. Drafts sit beside it in `drafts/`, as they do now. |
 | Settings | `/opt/skydash/.env`, readable only by `skydash`. Adds `ALLOWED_HOSTS=<droplet's Tailscale name>` and the new `FEEDGEN_HOSTNAME`. |
 | Private access | `tailscale serve` publishes the dashboard on the tailnet only. SSH uses a dedicated key (`~/.ssh/skydash_ed25519` on the Mac) and works only over Tailscale. Its Tailscale key expiry must be off (admin console → Machines → skydash → Disable key expiry), or it drops off the tailnet after 180 days. |
 | Public access | None, apart from `tailscale funnel` for the custom feed. The DigitalOcean Cloud Firewall `skydash-fw` has no inbound rules, so it drops all public traffic, and `ufw` on the droplet allows only the `tailscale0` interface and Tailscale's UDP port. Tailscale connects outbound, so it needs no open ports. |
 | Backups | DigitalOcean weekly backups of the whole droplet. A nightly systemd timer runs `sqlite3 .backup`, compresses the copy and uploads it with `rclone` through an encrypted remote to a private Cloudflare R2 bucket, keeping 14 days. The database holds sign-in sessions, so it is never uploaded unencrypted. |
-| Updates | Ubuntu unattended security upgrades. Skydash is deployed by pulling `main` and restarting the service (a script in the repo); GitHub Actions can run it later. |
+| Updates | Ubuntu unattended security upgrades. Deploy with `ssh skydash /opt/skydash/deploy/deploy.sh`: it pulls `main`, runs `npm ci`, updates the unit if it changed, restarts and shows the log if the start fails. GitHub Actions can run it later (#19). |
 | Monitoring | DigitalOcean's free monitoring with email alerts for disk over 80% and memory over 90% for 10 minutes; systemd restarts the process if it stops. |
 
 **Moving the data:** stop Skydash on the Mac, copy `data/` (database, WAL and drafts) to the droplet, start the service. Backfill on startup covers the few minutes it was off.
