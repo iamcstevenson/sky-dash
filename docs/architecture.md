@@ -2,7 +2,7 @@
 
 ## Overview
 
-One Node.js process (`src/server.ts`) on the user's Mac. It signs in to both accounts, collects posts into a local SQLite database, and serves a plain HTML/JavaScript page. There's no build step: Node 23.6+ runs the TypeScript files directly, and the page is vanilla JavaScript.
+One Node.js process (`src/server.ts`) on the user's Mac, or on a private server (see [Hosting](#hosting-planned-november-2026)). It signs in to both accounts, collects posts into a local SQLite database, and serves a plain HTML/JavaScript page. There's no build step: Node 23.6+ runs the TypeScript files directly, and the page is vanilla JavaScript.
 
 ```
 Bluesky Jetstream (live) ──┐
@@ -57,6 +57,47 @@ Everything lives in `data/skydash.db` (ignored by git). Main tables:
 | Each account's PDS | Sign-in, posting, likes, notifications, search, video tokens. | Login limits per day, so sessions are stored and reused. |
 | Bluesky video service | Video uploads. | Daily upload limits and email verification per account. |
 | Tailscale (optional) | Private phone access; Funnel for the public feed. | Third-party account needed. |
+
+## Hosting (planned, November 2026)
+
+Skydash moves from the Mac to one small DigitalOcean server ("droplet"). The code doesn't change: the same process runs under systemd instead of launchd. See decisions #15–#18, the requirements' Cloud hosting section, and issues #14–#19 for the steps.
+
+```
+                    DigitalOcean droplet (Ubuntu LTS, 1 GB, US region)
+                    ┌───────────────────────────────────────────────┐
+Bluesky services ◄──┤ skydash.service (Node LTS, user "skydash")    │
+                    │   dashboard 127.0.0.1:4747                    │
+                    │   feed server 127.0.0.1:4748                  │
+                    │   /var/lib/skydash/skydash.db (+ drafts/)     │
+                    │ tailscaled                                    │
+                    │   serve  :443 → 4747  (tailnet only)          │
+                    │   funnel :443 → 4748  (public, custom feed)   │
+                    │ nightly backup timer ─────────────────────────┼──► Cloudflare R2 (encrypted)
+                    └───────────────────────────────────────────────┘
+                       ▲ Tailscale only            DigitalOcean weekly backups
+   Mac, iPhone, Hub Agent ─┘                        (whole server)
+```
+
+| Piece | Choice |
+| --- | --- |
+| Server | DigitalOcean Basic droplet, 1 vCPU / 1 GB / 25 GB disk, Ubuntu LTS, US region. Skydash uses about 100 MB of memory and a 550 MB database. Resize to 2 GB when another project moves onto it. |
+| Runtime | Node LTS (24 or newer) from the official Node.js packages. |
+| Process | A systemd unit runs `node --env-file-if-exists=.env src/server.ts` as user `skydash` from `/opt/skydash`, with `Restart=always`, matching the launchd agent. |
+| Data | `DB_PATH=/var/lib/skydash/skydash.db`. Drafts sit beside it in `drafts/`, as they do now. |
+| Settings | `/opt/skydash/.env`, readable only by `skydash`. Adds `ALLOWED_HOSTS=<droplet's Tailscale name>` and the new `FEEDGEN_HOSTNAME`. |
+| Private access | `tailscale serve` publishes the dashboard on the tailnet only. SSH goes over Tailscale SSH. |
+| Public access | None, apart from `tailscale funnel` for the custom feed. A DigitalOcean Cloud Firewall drops all inbound public traffic; Tailscale works outbound, so it needs no open ports. |
+| Backups | DigitalOcean weekly backups of the whole droplet. A nightly systemd timer runs `sqlite3 .backup`, compresses the copy and uploads it with `rclone` through an encrypted remote to a private Cloudflare R2 bucket, keeping 14 days. The database holds sign-in sessions, so it is never uploaded unencrypted. |
+| Updates | Ubuntu unattended security upgrades. Skydash is deployed by pulling `main` and restarting the service (a script in the repo); GitHub Actions can run it later. |
+| Monitoring | DigitalOcean's free monitoring with alerts for disk over 80% and high memory; systemd restarts the process if it stops. |
+
+**Moving the data:** stop Skydash on the Mac, copy `data/` (database, WAL and drafts) to the droplet, start the service. Backfill on startup covers the few minutes it was off.
+
+**Custom feed:** its address is `did:web:<FEEDGEN_HOSTNAME>`, so a new host name means publishing the feed again from the dashboard. Giving the droplet the Mac's current Tailscale machine name (after renaming the Mac) would keep the old address instead.
+
+**Hub Agent:** still runs on the Mac and reads `/api/sync/*`, now from the droplet's Tailscale address instead of localhost. Collection no longer depends on the Mac; only syncing to iCloud does.
+
+**Outside services added:** DigitalOcean (hosting, billed monthly; an outage stops collection until it returns, and backfill fills the gap) and Cloudflare R2 (backups, free under 10 GB).
 
 ## Security
 
