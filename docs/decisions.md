@@ -2,7 +2,7 @@
 
 Recorded after the fact (November 2026). Add new decisions at the bottom with a date.
 
-### 1. Run locally, not hosted (October 2026)
+### 1. Run locally, not hosted (October 2026) — replaced by #15
 Zero cost and the user's data stays on their machine. Accepted cost: it only collects while the Mac is on, which backfill covers.
 
 ### 2. Collect with Jetstream plus backfill, not polling (October 2026)
@@ -43,3 +43,15 @@ Groups had keywords (searched) and "Must mention one of" (a filter on what the k
 
 ### 14. Groups are saved sets of keywords, with no rules (November 2026)
 Topic words (#13) still felt too complex in use. A group is now just a named set of keywords: view their posts together, pause or 📡 them together, filter Discover and Trending by it. Group rules, vague words, context words, group accounts and drag-and-drop are gone; each keyword's own ⚙ rules remain. Existing group rules were dropped rather than copied onto keywords (Christian's choice). Keywords are added in bulk with a group picker, or selected and saved as a group. Multi-word plain text is quoted as a phrase, since unquoted words match anywhere in a post (12 results vs 1 for "Big Blue Nation" in a live check); search syntax is kept as typed. Keywords can be edited in place, which clears their old matches and searches again. Hub's older saves (`keywordIds`, `topics`, `must`/`exclude`) are still accepted, and the sync export keeps the rule fields, empty. Issue #12.
+
+### 15. Host on one DigitalOcean droplet (November 2026)
+Running on the Mac meant collecting only while it was on and its external drive was plugged in, and the Mac was short on disk space. Christian dropped the zero-cost rule to get an always-on private host that future projects can share. Options: Oracle Cloud's free tier (ruled out by Christian; it also halved its free allowance in 2026), Google Cloud's free e2-micro (1 GB of traffic a month, too tight), Hetzner (repeated 2026 price rises and reported stock shortages), Fly.io (works, but private Tailscale access and single-host volumes add setup), AWS Lightsail (a close equal), and a DigitalOcean droplet. Chosen: a DigitalOcean Basic droplet with weekly backups, about $7 a month at 1 GB. Flat pricing with transfer included means no surprise bills, it's a plain Linux server so nothing about Skydash changes, and it's an established US company. iCloud was rejected for running anything: it can't run code, its sync can corrupt a live SQLite database, and Linux has no supported way to reach it.
+
+### 16. Private through Tailscale, no public ports (November 2026)
+Skydash keeps listening on `127.0.0.1` (#5). `tailscale serve` puts the dashboard on the tailnet and Tailscale SSH replaces public SSH, so the droplet's cloud firewall can drop all inbound traffic. The custom feed stays on Tailscale Funnel (#8), which also needs no open port. Considered: a public HTTPS site with a login, which would mean writing authentication for a page that can post as you.
+
+### 17. Encrypted nightly database copies in Cloudflare R2 (November 2026)
+DigitalOcean's weekly backups cover the whole server but stay with DigitalOcean and can lose up to a week. A nightly `sqlite3 .backup` uploaded through an `rclone` encrypted remote to R2 keeps 14 days off-site for free (under 10 GB) and lets the server be rebuilt anywhere. Encrypted because the database holds Bluesky sign-in sessions. Considered: DigitalOcean Spaces ($5 a month, same company as the server) and Litestream (continuous, but more moving parts than a daily copy of a database that backfill can catch up on).
+
+### 18. systemd and a deploy script, no containers (November 2026)
+One process with one dependency doesn't need Docker. A systemd unit mirrors the launchd agent, and deploying is `git pull`, `npm ci` and a restart through a script kept in the repo. Deploy-on-push with GitHub Actions is a later step, because it needs a Tailscale key stored in GitHub.
