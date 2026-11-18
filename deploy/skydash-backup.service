@@ -1,0 +1,11 @@
+# Runs deploy/backup.sh once. Started every night by skydash-backup.timer.
+[Unit]
+Description=Skydash nightly backup to Cloudflare R2
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/skydash/deploy/backup.sh
+Nice=10
+IOSchedulingClass=idle
