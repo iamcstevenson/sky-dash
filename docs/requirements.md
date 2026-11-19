@@ -48,9 +48,9 @@ Skydash runs on Christian's Mac with its code and database on an external drive 
 | Area | Requirement |
 | --- | --- |
 | Always on | Runs around the clock without the Mac or Lacie, starts on boot and restarts if it stops. |
-| Private | The dashboard is reachable only from Christian's own devices over Tailscale. The server accepts no public connections except the optional custom feed through Tailscale Funnel. |
+| Private | The dashboard is reachable only from Christian's own devices over Tailscale. The server accepts no public connections. |
 | Data safety | A whole-server backup at least weekly and an encrypted copy of the database at least daily, stored off the server. A restore has been tested. |
-| Same features | Everything in the tables above keeps working: Following, keywords, follows, trending, the custom feed and Hub sync. |
+| Same features | Everything in the tables above keeps working: Following, keywords, follows, trending and Hub sync. The custom feed stays off on the server (it was never published), so the server has no public route at all. |
 | Cost | A flat monthly bill of about $7–15, with no per-request charges that could spike. |
 | Rebuildable | A new server can be set up from the repository, the docs and the latest backup in about an hour. |
 
@@ -70,7 +70,6 @@ Skydash runs on Christian's Mac with its code and database on an external drive 
 - With the Mac shut down for a day, new posts from follows still appear when it's turned back on, and the stream shows no gap.
 - The dashboard opens from the Mac and iPhone through the server's Tailscale name, and from nowhere else (a check from outside the tailnet is refused).
 - A port scan of the server's public address finds nothing open.
-- The custom feed loads in the Bluesky app after republishing with the new host name.
 - Hub Agent syncs from the server.
 - The database is restored from the off-server backup onto a fresh server and Skydash starts on it.
 

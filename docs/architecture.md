@@ -93,7 +93,7 @@ Bluesky services ◄──┤ skydash.service (Node LTS, user "skydash")    │
 
 **Moving the data (done November 19, 2026, #17):** the Mac's LaunchAgent was stopped (`launchctl bootout`), the database copied with `sqlite3 .backup` (which folds in the WAL) and packed with `drafts/`, then unpacked into `/var/lib/skydash` and given to user `skydash`. The live stream resumed from the Mac's saved cursor, so nothing was missed. The server's own pre-cutover database is in `/root/pre-cutover` and in the R2 backups. To roll back, stop the service and start the Mac's LaunchAgent again; its data on Lacie is as it was at the cutover.
 
-**Custom feed:** not set up. It was never published from the Mac either, so no address needs to be kept. Turning it on means setting `FEEDGEN_HOSTNAME=skydash.tail4cef1e.ts.net`, running `tailscale funnel --bg 4748` (the server's only public route) and publishing the feed from the dashboard. Its address is `did:web:<FEEDGEN_HOSTNAME>`.
+**Custom feed:** off, by choice (November 2026). It was never published from the Mac either, so no address needs to be kept. Turning it on later means setting `FEEDGEN_HOSTNAME=skydash.tail4cef1e.ts.net`, running `tailscale funnel --bg 4748` (the server's only public route) and publishing the feed from the dashboard. Its address is `did:web:<FEEDGEN_HOSTNAME>`.
 
 **Hub Agent:** still runs on the Mac and reads `/api/sync/*` from the droplet. Its address is the `skydashURL` setting (`defaults write com.crstevenson.hub.agent skydashURL https://skydash.tail4cef1e.ts.net`, then restart HubAgent); without it, the agent uses `http://127.0.0.1:4747`. Collection no longer depends on the Mac; only syncing to iCloud does.
 
