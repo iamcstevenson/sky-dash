@@ -2,7 +2,7 @@
 
 ## Overview
 
-One Node.js process (`src/server.ts`) on the user's Mac, or on a private server (see [Hosting](#hosting-november-2026)). It signs in to both accounts, collects posts into a local SQLite database, and serves a plain HTML/JavaScript page. There's no build step: Node 23.6+ runs the TypeScript files directly, and the page is vanilla JavaScript.
+One Node.js process (`src/server.ts`) on a private server (Christian's, since November 2026) or on the user's own Mac (see [Hosting](#hosting-november-2026)). It signs in to both accounts, collects posts into a local SQLite database, and serves a plain HTML/JavaScript page. There's no build step: Node 23.6+ runs the TypeScript files directly, and the page is vanilla JavaScript.
 
 ```
 Bluesky Jetstream (live) ──┐
@@ -91,11 +91,11 @@ Bluesky services ◄──┤ skydash.service (Node LTS, user "skydash")    │
 | Updates | Ubuntu unattended security upgrades. Deploy with `ssh skydash /opt/skydash/deploy/deploy.sh`: it pulls `main`, runs `npm ci`, updates the units if they changed, restarts and shows the log if the start fails. GitHub Actions can run it later (#19). |
 | Monitoring | DigitalOcean's free monitoring with email alerts for disk over 80% and memory over 90% for 10 minutes; systemd restarts the process if it stops. |
 
-**Moving the data:** stop Skydash on the Mac, copy `data/` (database, WAL and drafts) to the droplet, start the service. Backfill on startup covers the few minutes it was off.
+**Moving the data (done November 19, 2026, #17):** the Mac's LaunchAgent was stopped (`launchctl bootout`), the database copied with `sqlite3 .backup` (which folds in the WAL) and packed with `drafts/`, then unpacked into `/var/lib/skydash` and given to user `skydash`. The live stream resumed from the Mac's saved cursor, so nothing was missed. The server's own pre-cutover database is in `/root/pre-cutover` and in the R2 backups. To roll back, stop the service and start the Mac's LaunchAgent again; its data on Lacie is as it was at the cutover.
 
-**Custom feed:** its address is `did:web:<FEEDGEN_HOSTNAME>`, so a new host name means publishing the feed again from the dashboard. Giving the droplet the Mac's current Tailscale machine name (after renaming the Mac) would keep the old address instead.
+**Custom feed:** not set up. It was never published from the Mac either, so no address needs to be kept. Turning it on means setting `FEEDGEN_HOSTNAME=skydash.tail4cef1e.ts.net`, running `tailscale funnel --bg 4748` (the server's only public route) and publishing the feed from the dashboard. Its address is `did:web:<FEEDGEN_HOSTNAME>`.
 
-**Hub Agent:** still runs on the Mac and reads `/api/sync/*`, now from the droplet's Tailscale address instead of localhost. Collection no longer depends on the Mac; only syncing to iCloud does.
+**Hub Agent:** still runs on the Mac and reads `/api/sync/*` from the droplet. Its address is the `skydashURL` setting (`defaults write com.crstevenson.hub.agent skydashURL https://skydash.tail4cef1e.ts.net`, then restart HubAgent); without it, the agent uses `http://127.0.0.1:4747`. Collection no longer depends on the Mac; only syncing to iCloud does.
 
 **Outside services added:** DigitalOcean (hosting, billed monthly; an outage stops collection until it returns, and backfill fills the gap) and Cloudflare R2 (backups, free under 10 GB).
 
