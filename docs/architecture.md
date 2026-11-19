@@ -80,7 +80,7 @@ Bluesky services ◄──┤ skydash.service (Node LTS, user "skydash")    │
 
 | Piece | Choice |
 | --- | --- |
-| Server | Droplet `skydash`: DigitalOcean Basic, 1 vCPU / 1 GB / 25 GB disk plus 1 GB swap, Ubuntu 24.04, San Francisco (SFO2; SFO3 had no 1 GB size). Built November 2026 (#14). Skydash uses about 100 MB of memory and a 550 MB database. Resize to 2 GB when another project moves onto it. |
+| Server | Droplet `skydash`: DigitalOcean Basic, 1 vCPU / 1 GB / 25 GB disk plus 1 GB swap, Ubuntu 24.04, San Francisco (SFO2; SFO3 had no 1 GB size). Built November 2026 (#14). Skydash uses about 100 MB of memory and a 550 MB database. Since November 2026 it also runs Tubedash (about 115 MB, served on the tailnet at `:8443`; see Tubedash's architecture doc), leaving about 400 MB free. Resize to 2 GB when the next project moves onto it. |
 | Runtime | Node LTS (24 or newer) from the official Node.js packages. |
 | Process | `deploy/skydash.service` (installed by `deploy/setup.sh`, which rebuilds a server from scratch) runs `node --env-file-if-exists=.env src/server.ts` as user `skydash` from `/opt/skydash`, with `Restart=always`, matching the launchd agent. |
 | Data | `DB_PATH=/var/lib/skydash/skydash.db`. Drafts sit beside it in `drafts/`, as they do now. |
