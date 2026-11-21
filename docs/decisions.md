@@ -58,3 +58,13 @@ One process with one dependency doesn't need Docker. A systemd unit mirrors the 
 
 ### 19. Plain SSH over Tailscale, not Tailscale SSH (November 2026)
 Tailscale SSH's default policy asks for a browser re-check before root logins, which blocks scripted deploys. Instead OpenSSH keeps key-only logins (passwords off), and both firewalls only let it be reached through Tailscale. The droplet uses its own key without a passphrase, kept only on the Mac, so scripts can connect without unlocking a key.
+
+### 20. Move the server to New York (November 2026)
+Christian is on Eastern time, and from his Mac every request to San Francisco took at least 100 ms before Skydash did any work (most requests take under 15 ms on the server). DigitalOcean's NYC3 region offers the same 1 GB size at the same price. The server is rebuilt there from `deploy/setup.sh` and the latest R2 backups for both Skydash and Tubedash, keeps the Tailscale name `skydash` so no address changes, and the San Francisco droplet is deleted only after the new one has run cleanly for a day. Considered: staying put and relying on compression alone, which helps download size but not the round trip on every request.
+
+### 21. Compression and browser caching built in, no proxy (November 2026)
+Responses were sent uncompressed with `Cache-Control: no-cache`, so the phone downloaded about 500 KB on every load. Node's built-in `zlib` compresses text responses (gzip or Brotli, whichever the browser accepts), and static files get an `ETag` so the browser revalidates instead of downloading them again. Considered: putting Caddy or nginx in front, which adds a second service to run for something Node already has.
+
+### 22. Lists tab manages curated lists only (November 2026)
+The Bluesky lists Christian reads are curated lists. Moderation lists (mute and block) and starter packs act on accounts in ways that need their own confirmations and are left out. Lists are read and changed straight on the account's PDS, not stored in the database, so the Bluesky app and Skydash always agree. A list feed uses Bluesky's own `getListFeed`, so it includes members Skydash doesn't otherwise follow.
+
