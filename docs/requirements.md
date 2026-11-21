@@ -73,6 +73,32 @@ Skydash runs on Christian's Mac with its code and database on an external drive 
 - Hub Agent syncs from the server.
 - The database is restored from the off-server backup onto a fresh server and Skydash starts on it.
 
+## Version 2 (November 2026)
+
+### Problem
+
+Skydash works, but it feels slow from the phone and the Mac, the phone layout wastes space and hides parts of the Follows table, and lists can only be created and filled in bulk, not managed.
+
+### Must have
+
+| Area | Requirement |
+| --- | --- |
+| Speed | Pages and data are compressed. The app code and styles are cached by the browser and only downloaded again when they change. The unread-notification count doesn't ask Bluesky on every refresh. The server is in New York (closer to Christian, on Eastern time) instead of San Francisco. |
+| Phone layout | At iPhone width, posts start near the top of the screen: a compact header that hides while scrolling down, every tab reachable without sideways scrolling, and filters folded behind one button. Follows shows each account's key stats without sideways scrolling. Post headers fit on one or two lines. Desktop is unchanged. |
+| Lists | A Lists tab for the acting account: see its curated lists, create, rename (with description) and delete them (with confirmation), see and remove members, add people from search, Follows or a profile card, read a list as a feed of its members' recent posts, and copy a list to the other account. |
+
+### Out of scope
+
+- Moderation lists (block and mute lists), and starter packs.
+- Lists owned by other people, other than reading one shared as a link.
+
+### How we know it works
+
+- The dashboard's first load downloads at least 60% less than before, and a second visit doesn't download `app.js` or `style.css` again.
+- From the Mac, a small request like `/api/status` takes clearly less time than the 0.3 s measured from San Francisco.
+- At 375 px wide, the first post is visible without scrolling on Following, and every tab and every Follows stat is reachable.
+- A list created in Skydash appears in the Bluesky app with the same members; renaming, removing a member and deleting show there too.
+
 ## Out of scope
 
 - Hosting for other people, or any public web version.
