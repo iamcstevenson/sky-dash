@@ -1338,7 +1338,8 @@ const fv = {
   search: '',
   quick: new Set(),
   lowN: 3,
-  sort: { key: 'lastActiveMs', dir: 1 }, // quietest first
+  // Sort columns in order; the first decides, the rest break ties. Kept per view (your follows, analyses).
+  sorts: [],
   selected: new Set(),
   shown: 150,
   // Your curated lists (both accounts) and who is on each: { lists: [{ uri, name, slot, count }], byDid: { did: [uri] } }
@@ -1475,19 +1476,19 @@ function sortValue(r, key) {
 
 function renderFollows() {
   const rows = filteredFollows()
-  const { key, dir } = fv.sort
-  if ($('#fvSortSel').value !== key) $('#fvSortSel').value = key
+  if (!fv.sorts.length) fv.sorts = loadSorts(fv.mode)
   updateFvQuickToggle()
   rows.sort((a, b) => {
-    const x = sortValue(a, key)
-    const y = sortValue(b, key)
-    return (x < y ? -1 : x > y ? 1 : 0) * dir
+    for (const { key, dir } of fv.sorts) {
+      const x = sortValue(a, key)
+      const y = sortValue(b, key)
+      if (x < y) return -dir
+      if (x > y) return dir
+    }
+    return 0
   })
   fv.visible = rows
-  document.querySelectorAll('.fv-table th[data-sort]').forEach((th) => {
-    th.classList.toggle('sorted', th.dataset.sort === key)
-    th.textContent = th.textContent.replace(/ [▲▼]$/, '') + (th.dataset.sort === key ? (dir === 1 ? ' ▲' : ' ▼') : '')
-  })
+  renderSortHeaders()
 
   const quietMs = Date.now() - fv.days * DAY
   $('#fvBody').innerHTML = rows.slice(0, fv.shown).map((r) => {
@@ -1570,21 +1571,91 @@ $('#fvQuick').addEventListener('change', (e) => {
 $('#fvLowN').addEventListener('click', (e) => e.preventDefault()) // typing in it shouldn't toggle the chip
 $('#fvLowN').addEventListener('focus', (e) => e.target.select())
 
+// ---------- sorting by several columns ----------
+
+const DEFAULT_SORTS = {
+  mine: [{ key: 'lastActiveMs', dir: 1 }], // quietest first, for tidying up
+  ext: [{ key: 'posts', dir: -1 }], // most active first, for finding people
+}
+const MAX_SORTS = 4
+// Numbers sort high-to-low first, except name and "last active" (oldest, i.e. quietest, first)
+const firstDir = (key) => (['name', 'lastActiveMs'].includes(key) ? 1 : -1)
+
+function loadSorts(mode) {
+  try {
+    const saved = JSON.parse(safeGet(`fvSort:${mode}`) || 'null')
+    if (Array.isArray(saved) && saved.length && saved.every((s) => s && typeof s.key === 'string' && (s.dir === 1 || s.dir === -1))) return saved.slice(0, MAX_SORTS)
+  } catch {}
+  return DEFAULT_SORTS[mode].map((s) => ({ ...s }))
+}
+
+function saveSorts() {
+  safeSet(`fvSort:${fv.mode}`, JSON.stringify(fv.sorts))
+}
+
+// Click: sort by this column alone (again: flip). Shift-click: add it as the next tiebreaker (again: flip).
+function setSort(key, add) {
+  const i = fv.sorts.findIndex((s) => s.key === key)
+  if (add) {
+    if (i >= 0) fv.sorts[i].dir = -fv.sorts[i].dir
+    else if (fv.sorts.length < MAX_SORTS) fv.sorts.push({ key, dir: firstDir(key) })
+    else return toast(`Sort by at most ${MAX_SORTS} columns`)
+  } else if (fv.sorts.length === 1 && i === 0) {
+    fv.sorts[0].dir = -fv.sorts[0].dir
+  } else {
+    fv.sorts = [{ key, dir: firstDir(key) }]
+  }
+  saveSorts()
+  renderFollows()
+}
+
+function sortLabel(key) {
+  const th = document.querySelector(`.fv-table th[data-sort="${key}"]`)
+  return th?.dataset.base ?? th?.textContent ?? key
+}
+
+function renderSortHeaders() {
+  const many = fv.sorts.length > 1
+  document.querySelectorAll('.fv-table th[data-sort]').forEach((th) => {
+    th.dataset.base ??= th.textContent.replace(/ [▲▼]\d?$/, '')
+    const i = fv.sorts.findIndex((s) => s.key === th.dataset.sort)
+    th.classList.toggle('sorted', i >= 0)
+    th.textContent = th.dataset.base + (i >= 0 ? ` ${fv.sorts[i].dir === 1 ? '▲' : '▼'}${many ? i + 1 : ''}` : '')
+  })
+  $('#fvSortBar').innerHTML = `<span class="dim">Sorted by</span>` + fv.sorts.map((s, i) => `<span class="sort-chip">
+      ${many ? `<b>${i + 1}</b>` : ''}${esc(sortLabel(s.key))}
+      <button type="button" data-sort-flip="${s.key}" title="${s.dir === 1 ? 'Ascending: click for descending' : 'Descending: click for ascending'}">${s.dir === 1 ? '▲' : '▼'}</button>
+      ${fv.sorts.length > 1 ? `<button type="button" data-sort-rm="${s.key}" title="Stop sorting by this">×</button>` : ''}
+    </span>`).join('') + `<span class="dim sort-hint">Shift-click a column to add a tiebreaker</span>`
+  $('#fvSortSel').value = ''
+}
+
 document.querySelector('.fv-table thead').addEventListener('click', (e) => {
   const th = e.target.closest('th[data-sort]')
   if (!th) return
-  const key = th.dataset.sort
-  // Numbers sort high-to-low first, except "last active" where oldest (quietest) first is most useful
-  const firstDir = ['name', 'lastActiveMs'].includes(key) ? 1 : -1
-  fv.sort = fv.sort.key === key ? { key, dir: -fv.sort.dir } : { key, dir: firstDir }
+  window.getSelection()?.removeAllRanges() // shift-click would otherwise select the header text
+  setSort(th.dataset.sort, e.shiftKey)
+})
+
+$('#fvSortBar').addEventListener('click', (e) => {
+  const flip = e.target.closest('[data-sort-flip]')?.dataset.sortFlip
+  const rm = e.target.closest('[data-sort-rm]')?.dataset.sortRm
+  if (flip) {
+    const s = fv.sorts.find((x) => x.key === flip)
+    if (s) s.dir = -s.dir
+  }
+  if (rm) fv.sorts = fv.sorts.filter((x) => x.key !== rm)
+  if (!flip && !rm) return
+  saveSorts()
   renderFollows()
 })
 
-// On a phone the table becomes cards with no header row, so sorting moves to this menu
+// On a phone the table becomes cards with no header row: this menu adds a column to the sort
 $('#fvSortSel').addEventListener('change', (e) => {
   const key = e.target.value
-  fv.sort = { key, dir: ['name', 'lastActiveMs'].includes(key) ? 1 : -1 }
-  renderFollows()
+  if (!key) return
+  if (fv.sorts.some((s) => s.key === key)) setSort(key, false)
+  else setSort(key, true)
 })
 
 function updateFvQuickToggle() {
@@ -1646,6 +1717,7 @@ function isNewToMe(r) {
 // ---------- another account's follows ----------
 
 function setFollowsMode(mode) {
+  if (fv.mode !== mode || !fv.sorts.length) fv.sorts = loadSorts(mode)
   fv.mode = mode
   document.querySelectorAll('#followsView [data-mine-only]').forEach((el) => {
     el.hidden = mode === 'ext'
@@ -1656,9 +1728,9 @@ function setFollowsMode(mode) {
     }
   })
   const th = (key) => document.querySelector(`.fv-table th[data-sort="${key}"]`)
-  th('followedBy').textContent = mode === 'ext' ? 'You' : 'By'
+  th('followedBy').dataset.base = mode === 'ext' ? 'You' : 'By'
   th('followedBy').title = mode === 'ext' ? 'Which of your accounts follow them' : 'Which of your accounts follow them'
-  th('followsBack').textContent = mode === 'ext' ? 'Follows them' : 'Follows you'
+  th('followsBack').dataset.base = mode === 'ext' ? 'Follows them' : 'Follows you'
   th('followsBack').title = mode === 'ext' ? `Whether they follow @${fv.target?.handle ?? ''} back` : 'Which of your accounts they follow'
   th('interactions').title = mode === 'ext' ? 'Their likes, replies, reposts, quotes and mentions of your accounts' : 'Likes, replies, reposts, quotes and mentions of your accounts'
   if (mode === 'mine') {
@@ -1676,7 +1748,6 @@ async function startAnalysis(handle, refresh = false) {
     fv.selected.clear()
     fv.overlap = 'new'
     fv.shown = 150
-    fv.sort = { key: 'posts', dir: -1 } // most active first, for finding people
     safeSet('fvTarget', s.did)
     $('#fvAnalyzeInput').value = ''
     await loadAnalysis()
@@ -1760,7 +1831,6 @@ $('#fvRecent').addEventListener('click', async (e) => {
   if (!b) return
   fv.target = { did: b.dataset.recent }
   fv.overlap = 'new'
-  fv.sort = { key: 'posts', dir: -1 }
   fv.selected.clear()
   safeSet('fvTarget', b.dataset.recent)
   loadAnalysis()
@@ -1770,7 +1840,6 @@ $('#fvTargetBar').addEventListener('click', (e) => {
   if (act === 'back') {
     fv.selected.clear()
     fv.overlap = 'all'
-    fv.sort = { key: 'lastActiveMs', dir: 1 } // quietest first, for tidying up
     setFollowsMode('mine')
     loadFollows()
   }

@@ -792,3 +792,17 @@ a.pc-btn:hover { text-decoration: none; border-color: var(--accent); }
   .fv-target-acts { width: 100%; }
   .fv-target-acts button { flex: 1; }
 }
+
+/* ---------- Sorting by several columns ---------- */
+.fv-sortbar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; font-size: 13px; }
+.sort-chip {
+  display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 10px; border-radius: 999px;
+  border: 1px solid var(--accent); background: var(--surface);
+}
+.sort-chip b { color: var(--accent); }
+.sort-chip button { border: 0; background: none; color: var(--accent); padding: 0 6px; border-radius: 999px; font-size: 13px; }
+.sort-chip button:hover { background: var(--surface-2); }
+.fv-table th[data-sort] { white-space: nowrap; }
+@media (max-width: 600px) {
+  .sort-hint { display: none; }
+}
