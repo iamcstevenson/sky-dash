@@ -765,3 +765,30 @@ a.pc-btn:hover { text-decoration: none; border-color: var(--accent); }
   .fv-table td.lists-td { max-width: none; white-space: normal; }
 }
 .who-cell b.gone { color: var(--muted); font-style: italic; font-weight: 500; }
+
+/* ---------- Another account's follows ---------- */
+.fv-analyze { display: flex; gap: 8px; margin-bottom: 8px; }
+.fv-analyze input {
+  flex: 1; min-width: 0; padding: 6px 12px; border-radius: 999px; font: inherit;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+}
+.fv-recent { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.fv-recent:empty { display: none; }
+.fv-recent .chip { color: var(--text); }
+.fv-target { margin-bottom: 10px; }
+.fv-target-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.fv-target-head img { width: 40px; height: 40px; border-radius: 50%; background: var(--surface-2); object-fit: cover; cursor: pointer; }
+.fv-target-names { flex: 1; min-width: 160px; }
+.fv-target-names b, .fv-target-names small { display: block; }
+.fv-target-names small { color: var(--muted); }
+.fv-target-acts { display: flex; gap: 6px; }
+.fv-target .fv-note { margin: 8px 0 0; }
+.fv-progress { height: 6px; margin-top: 10px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.fv-progress span { display: block; height: 100%; background: var(--accent); transition: width .4s ease; }
+.row-acts button.good { color: #fff; background: var(--accent); border-radius: 999px; padding: 2px 10px; }
+.row-acts button.good:hover { background: color-mix(in srgb, var(--accent) 85%, #000); }
+.row-following { font-size: 12px; padding: 2px 6px; }
+@media (max-width: 600px) {
+  .fv-target-acts { width: 100%; }
+  .fv-target-acts button { flex: 1; }
+}
