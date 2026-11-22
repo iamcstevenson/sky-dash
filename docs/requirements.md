@@ -87,7 +87,32 @@ Skydash works, but it feels slow from the phone and the Mac, the phone layout wa
 | Phone layout | At iPhone width, posts start near the top of the screen: a compact header that hides while scrolling down, every tab reachable without sideways scrolling, and filters folded behind one button. Follows shows each account's key stats without sideways scrolling. Post headers fit on one or two lines. Desktop is unchanged. |
 | Lists | A Lists tab for the acting account: see its curated lists, create, rename (with description) and delete them (with confirmation), see and remove members, add people from search, Follows or a profile card, read a list as a feed of its members' recent posts, and copy a list to the other account. |
 
+### Follows, version 3 (November 2026)
+
+### Problem
+
+The Follows tab only looks at Christian's own follows, and lists can only be filled from it in bulk ("Move to list", which also unfollows). He wants to look through who another account follows, quickly follow and list the people he isn't already engaged with, and manage list membership from the same table. Rows for deleted or deactivated accounts show a bare `did:plc:…` and clutter the top of the "Last active" sort.
+
+### Must have
+
+| Area | Requirement |
+| --- | --- |
+| Another account's follows | Type a Bluesky handle on the Follows tab and see the accounts it follows with the same 14-day stats (posts, replies, reposts, repost %, last active, followers) and whether each follows that account back. A "You" column shows which of Christian's accounts follow each one. A "New to me" filter shows accounts neither of his accounts follows, that aren't on any of his lists, and that he hasn't muted. Each row has one-click Follow (as the acting account) and + List; selected rows can be followed or added to a list in bulk. A progress bar shows while it reads; results are kept for 24 hours with a Refresh button. Interacted is left blank (it needs the other person's notifications). |
+| Lists on Follows | In both views: a Lists column with each account's lists, a filter for one list or "Not on any list", a per-row list button to tick lists on and off, and bulk Add to list and Remove from list. "Move to list" becomes Add to list with an "Also unfollow" option. |
+| Deleted accounts | Rows whose profile can't be found are labelled "Deleted or deactivated" and have their own filter, so they can be selected and unfollowed together. |
+
 ### Out of scope
+
+- Keeping analyses permanently, comparing two other accounts with each other, and the other account's interactions.
+
+### How we know it works
+
+- An account following about 1,000 people is analysed in under 3 minutes, and opening it again within a day is instant.
+- Follow and + List each take one click from a row, and show up in the Bluesky app.
+- The deleted-account filter finds the bare `did:plc` rows.
+- The new controls work at 375 px wide.
+
+## Out of scope
 
 - Moderation lists (block and mute lists), and starter packs.
 - Lists owned by other people, other than reading one shared as a link.
