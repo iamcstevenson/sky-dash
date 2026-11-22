@@ -136,7 +136,26 @@ export async function groupedNotifications(slot: unknown, feed: string, cursor: 
   }
 }
 
+// Unread counts are asked for by every open page every 30 seconds, and each one is a round trip to each
+// account's PDS, so answers are shared for a minute. Marking as seen clears that account's count at once.
+const UNREAD_TTL_MS = 60_000
+let unreadCache: { at: number; counts: Record<number, number> } | null = null
+let unreadInFlight: Promise<Record<number, number>> | null = null
+
 export async function unreadCounts() {
+  if (unreadCache && Date.now() - unreadCache.at < UNREAD_TTL_MS) return unreadCache.counts
+  unreadInFlight ??= fetchUnreadCounts()
+    .then((counts) => {
+      unreadCache = { at: Date.now(), counts }
+      return counts
+    })
+    .finally(() => {
+      unreadInFlight = null
+    })
+  return unreadInFlight
+}
+
+async function fetchUnreadCounts() {
   const out: Record<number, number> = {}
   await Promise.all(
     accounts
@@ -156,7 +175,9 @@ export async function unreadCounts() {
 export async function markSeen(slot: unknown, seenAt: unknown) {
   const at = new Date(String(seenAt))
   if (Number.isNaN(at.getTime())) throw new NotifError(400, 'Invalid time')
-  await signedIn(slot).agent.app.bsky.notification.updateSeen({ seenAt: at.toISOString() })
+  const a = signedIn(slot)
+  await a.agent.app.bsky.notification.updateSeen({ seenAt: at.toISOString() })
+  if (unreadCache) unreadCache.counts = { ...unreadCache.counts, [a.slot]: 0 }
   return { ok: true }
 }
 
