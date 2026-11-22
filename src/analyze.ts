@@ -4,11 +4,13 @@
 import { config } from './config.ts'
 import { db } from './db.ts'
 import { accounts } from './accounts.ts'
+import { createHash } from 'node:crypto'
 
 const KEEP_MS = 24 * 3_600_000
 const WORKERS = 4
 const MIN_GAP_MS = 125 // between request starts, so at most 8 a second
 const MAX_FOLLOWS = 10_000
+const MAX_GROUP = 10
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS ext_analyses (
@@ -40,9 +42,25 @@ db.exec(`
   );
 `)
 
-if (!(db.prepare('PRAGMA table_info(ext_stats)').all() as { name: string }[]).some((c) => c.name === 'capped')) {
-  db.exec('ALTER TABLE ext_stats ADD COLUMN capped INTEGER NOT NULL DEFAULT 0')
+function addColumn(table: string, column: string, type: string) {
+  if (!(db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`)
+  }
 }
+addColumn('ext_stats', 'capped', 'INTEGER NOT NULL DEFAULT 0')
+// When this account's 14 days were read, so other analyses within the day can reuse them (decision #24)
+addColumn('ext_stats', 'read_at', 'INTEGER')
+// 0 when the analysis only ran as part of a group, so the recent list shows what you looked up yourself
+addColumn('ext_analyses', 'solo', 'INTEGER NOT NULL DEFAULT 1')
+db.exec(`
+  CREATE TABLE IF NOT EXISTS ext_groups (
+    id TEXT PRIMARY KEY,
+    members TEXT NOT NULL,
+    started_at INTEGER NOT NULL,
+    finished_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS ext_stats_did ON ext_stats(did, read_at);
+`)
 
 class AnalyzeError extends Error {
   status: number
@@ -120,12 +138,18 @@ async function activity(did: string) {
 
 // ---------- running an analysis ----------
 
+// One account is read at a time; a group reads its members one after another
 let running: string | null = null
+let groupRunning: string | null = null
+
+const fresh = (s: { finishedAt: number | null; error: string | null } | null) =>
+  !!s?.finishedAt && !s.error && Date.now() - s.finishedAt < KEEP_MS
 
 function status(did: string) {
   const a = db.prepare('SELECT * FROM ext_analyses WHERE target_did = ?').get(did) as any
   if (!a) return null
   return {
+    kind: 'single' as const,
     did: a.target_did,
     handle: a.handle,
     displayName: a.display_name,
@@ -139,34 +163,62 @@ function status(did: string) {
   }
 }
 
+function busyError() {
+  const other = running ? status(running) : null
+  const what = groupRunning ? 'a group' : `@${other?.handle ?? 'another account'}`
+  return new AnalyzeError(409, `Still reading ${what} (${other?.done ?? 0} of ${other?.total ?? '?'}); try again when it finishes`)
+}
+
+function checkSize(profile: any) {
+  if ((profile.followsCount ?? 0) > MAX_FOLLOWS) {
+    throw new AnalyzeError(400, `@${profile.handle} follows ${profile.followsCount.toLocaleString()} accounts; the limit is ${MAX_FOLLOWS.toLocaleString()}`)
+  }
+}
+
+// Sets up the analysis row for one account and clears its old results
+function prepare(profile: any, solo: boolean) {
+  db.prepare(`INSERT INTO ext_analyses (target_did, handle, display_name, avatar, started_at, total, done, solo)
+    VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+    ON CONFLICT(target_did) DO UPDATE SET handle = excluded.handle, display_name = excluded.display_name, avatar = excluded.avatar,
+      started_at = excluded.started_at, finished_at = NULL, total = excluded.total, done = 0, error = NULL,
+      solo = MAX(ext_analyses.solo, excluded.solo)`)
+    .run(profile.did, profile.handle, profile.displayName ?? null, profile.avatar ?? null, Date.now(), profile.followsCount ?? 0, solo ? 1 : 0)
+  db.prepare('DELETE FROM ext_stats WHERE target_did = ?').run(profile.did)
+}
+
+async function runOne(did: string, handle: string) {
+  running = did
+  try {
+    await run(did)
+  } catch (err: any) {
+    console.error(`Analysis of ${handle} failed`, err)
+    db.prepare('UPDATE ext_analyses SET error = ?, finished_at = ? WHERE target_did = ?').run(err?.message ?? String(err), Date.now(), did)
+  } finally {
+    running = null
+  }
+}
+
+function cleanActor(text: unknown) {
+  return String(text ?? '').trim().replace(/^@/, '').replace(/^https?:\/\/bsky\.app\/profile\//, '').replace(/\/.*$/, '')
+}
+
 export async function startAnalysis(body: any) {
-  const actor = String(body.handle ?? '').trim().replace(/^@/, '').replace(/^https?:\/\/bsky\.app\/profile\//, '').replace(/\/.*$/, '')
+  const actor = cleanActor(body.handle)
   if (!actor) throw new AnalyzeError(400, 'Type a Bluesky handle')
   const profile = await xrpc('app.bsky.actor.getProfile', { actor }).catch((err) => {
     throw new AnalyzeError(404, `Couldn't find @${actor}: ${err.message}`)
   })
-  const did = profile.did as string
-  const prev = status(did)
-  const fresh = prev?.finishedAt && !prev.error && Date.now() - prev.finishedAt < KEEP_MS
-  if (prev?.running || (fresh && !body.refresh)) return prev
-  if (running) {
-    const other = status(running)
-    throw new AnalyzeError(409, `Still reading @${other?.handle ?? 'another account'} (${other?.done ?? 0} of ${other?.total ?? '?'}); try again when it finishes`)
+  const prev = status(profile.did)
+  if (prev?.running) return prev
+  if (fresh(prev) && !body.refresh) {
+    db.prepare('UPDATE ext_analyses SET solo = 1 WHERE target_did = ?').run(profile.did)
+    return status(profile.did)
   }
-  if ((profile.followsCount ?? 0) > MAX_FOLLOWS) {
-    throw new AnalyzeError(400, `@${profile.handle} follows ${profile.followsCount.toLocaleString()} accounts; the limit is ${MAX_FOLLOWS.toLocaleString()}`)
-  }
-  db.prepare(`INSERT OR REPLACE INTO ext_analyses (target_did, handle, display_name, avatar, started_at, total, done)
-    VALUES (?, ?, ?, ?, ?, ?, 0)`).run(did, profile.handle, profile.displayName ?? null, profile.avatar ?? null, Date.now(), profile.followsCount ?? 0)
-  db.prepare('DELETE FROM ext_stats WHERE target_did = ?').run(did)
-  running = did
-  run(did).catch((err) => {
-    console.error(`Analysis of ${profile.handle} failed`, err)
-    db.prepare('UPDATE ext_analyses SET error = ?, finished_at = ? WHERE target_did = ?').run(err?.message ?? String(err), Date.now(), did)
-  }).finally(() => {
-    running = null
-  })
-  return status(did)
+  if (running || groupRunning) throw busyError()
+  checkSize(profile)
+  prepare(profile, true)
+  runOne(profile.did, profile.handle)
+  return status(profile.did)
 }
 
 async function run(target: string) {
@@ -196,17 +248,23 @@ async function run(target: string) {
     for (const r of res.relationships ?? []) if (r.did) back.run(r.followedBy ? 1 : 0, target, r.did)
   }
 
-  // 3. Each one's last 14 days, four at a time
-  const save = db.prepare(`UPDATE ext_stats SET posts = ?, replies = ?, reposts = ?, last_active_ms = ?, capped = ?, read_ok = 1
+  // 3. Each one's last 14 days, four at a time. Accounts another analysis read within the day are copied, not read again.
+  const save = db.prepare(`UPDATE ext_stats SET posts = ?, replies = ?, reposts = ?, last_active_ms = ?, capped = ?, read_at = ?, read_ok = 1
     WHERE target_did = ? AND did = ?`)
+  const known = db.prepare(`SELECT posts, replies, reposts, last_active_ms, capped, read_at FROM ext_stats
+    WHERE did = ? AND read_ok = 1 AND read_at > ? AND target_did != ? ORDER BY read_at DESC LIMIT 1`)
   const progress = db.prepare('UPDATE ext_analyses SET done = done + 1 WHERE target_did = ?')
   let next = 0
   const worker = async () => {
     while (next < follows.length) {
       const f = follows[next++]
       try {
-        const a = await activity(f.did)
-        save.run(a.posts, a.replies, a.reposts, a.last || null, a.capped ? 1 : 0, target, f.did)
+        const k = known.get(f.did, Date.now() - KEEP_MS, target) as any
+        if (k) save.run(k.posts, k.replies, k.reposts, k.last_active_ms, k.capped, k.read_at, target, f.did)
+        else {
+          const a = await activity(f.did)
+          save.run(a.posts, a.replies, a.reposts, a.last || null, a.capped ? 1 : 0, Date.now(), target, f.did)
+        }
       } catch {
         // Deleted, deactivated or blocked from public view: leave its numbers empty
       }
@@ -217,6 +275,64 @@ async function run(target: string) {
   db.prepare('UPDATE ext_analyses SET finished_at = ?, error = NULL WHERE target_did = ?').run(Date.now(), target)
 }
 
+// ---------- groups (decision #24) ----------
+
+function groupMembers(id: string): string[] {
+  const g = db.prepare('SELECT members FROM ext_groups WHERE id = ?').get(id) as any
+  if (!g) throw new AnalyzeError(404, 'No analysis for that group')
+  return JSON.parse(g.members)
+}
+
+function groupStatus(id: string) {
+  const g = db.prepare('SELECT * FROM ext_groups WHERE id = ?').get(id) as any
+  if (!g) return null
+  const members = (JSON.parse(g.members) as string[]).map((d) => status(d) ?? { did: d, handle: d, total: 0, done: 0, finishedAt: null, error: 'Not read', running: false } as any)
+  const errors = members.filter((m) => m.error).map((m) => `@${m.handle}: ${m.error}`)
+  return {
+    kind: 'group' as const,
+    id: g.id,
+    members: members.map((m) => ({ did: m.did, handle: m.handle, displayName: m.displayName, avatar: m.avatar, total: m.total, done: m.done, finishedAt: m.finishedAt, error: m.error })),
+    startedAt: g.started_at,
+    finishedAt: g.finished_at,
+    total: members.reduce((n, m) => n + (m.total ?? 0), 0),
+    done: members.reduce((n, m) => n + (fresh(m) ? m.total : m.done ?? 0), 0),
+    error: groupRunning === id ? null : errors.join('; ') || null,
+    running: groupRunning === id,
+  }
+}
+
+// Up to 10 accounts analysed together. Members read within the day are reused; the rest are read in turn.
+export async function startGroup(body: any) {
+  const dids = [...new Set((Array.isArray(body.dids) ? body.dids : []).map(String))].filter((d) => d.startsWith('did:'))
+  if (dids.length < 2) throw new AnalyzeError(400, 'Choose at least 2 accounts')
+  if (dids.length > MAX_GROUP) throw new AnalyzeError(400, `Choose at most ${MAX_GROUP} accounts`)
+  const id = 'g' + createHash('sha1').update([...dids].sort().join(',')).digest('hex').slice(0, 12)
+  const prev = groupStatus(id)
+  if (prev?.running) return prev
+  const res = await xrpc('app.bsky.actor.getProfiles', { actors: dids })
+  const profiles = res.profiles ?? []
+  if (profiles.length < 2) throw new AnalyzeError(404, "Couldn't find those accounts")
+  for (const p of profiles) checkSize(p)
+  const todo = profiles.filter((p: any) => body.refresh || !fresh(status(p.did)))
+  if (todo.length && (running || groupRunning)) throw busyError()
+  const order = profiles.map((p: any) => p.did)
+  db.prepare(`INSERT INTO ext_groups (id, members, started_at, finished_at) VALUES (?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET members = excluded.members, started_at = excluded.started_at, finished_at = excluded.finished_at`)
+    .run(id, JSON.stringify(order), Date.now(), todo.length ? null : Date.now())
+  if (!todo.length) return groupStatus(id)
+  for (const p of todo) prepare(p, false)
+  groupRunning = id
+  ;(async () => {
+    try {
+      for (const p of todo) await runOne(p.did, p.handle)
+    } finally {
+      groupRunning = null
+      db.prepare('UPDATE ext_groups SET finished_at = ? WHERE id = ?').run(Date.now(), id)
+    }
+  })()
+  return groupStatus(id)
+}
+
 // ---------- reading results ----------
 
 export function analysisStatus(did: unknown) {
@@ -225,17 +341,24 @@ export function analysisStatus(did: unknown) {
   return s
 }
 
-// Analyses still within their 24 hours, newest first
-export function recentAnalyses() {
-  const rows = db.prepare('SELECT target_did FROM ext_analyses WHERE started_at > ? ORDER BY started_at DESC').all(Date.now() - KEEP_MS) as any[]
-  return rows.map((r) => status(r.target_did))
+export function analysisGroupStatus(id: unknown) {
+  const s = groupStatus(String(id ?? ''))
+  if (!s) throw new AnalyzeError(404, 'No analysis for that group')
+  return s
 }
 
-// Rows in the same shape as the Follows tab's, plus followsTarget. "By" is which of your accounts follow them;
-// "Interacted" is how often they've interacted with your accounts, from your notifications.
-export function analysisRows(did: unknown) {
-  const target = String(did ?? '')
-  const s = analysisStatus(target)
+// Analyses and groups still within their 24 hours, newest first
+export function recentAnalyses() {
+  const since = Date.now() - KEEP_MS
+  const singles = (db.prepare('SELECT target_did FROM ext_analyses WHERE started_at > ? AND solo = 1').all(since) as any[]).map((r) => status(r.target_did)!)
+  const groups = (db.prepare('SELECT id FROM ext_groups WHERE started_at > ?').all(since) as any[]).map((r) => groupStatus(r.id)!)
+  return [...singles, ...groups].sort((a, b) => b.startedAt - a.startedAt)
+}
+
+// Rows in the same shape as the Follows tab's. "By" is which of your accounts follow them; "Interacted" is how
+// often they've interacted with your accounts, from your notifications. For a group, `members` lists which of
+// the group follow each one and `followsTargetCount` how many of the group they follow back.
+function buildRows(targets: string[]) {
   const own = new Set(accounts.map((a) => a.did).filter(Boolean))
   const slotOf = new Map(accounts.filter((a) => a.did).map((a) => [a.did!, a.slot]))
   const mine = new Map<string, { followedBy: number[]; followsBack: number[]; muted: number[] }>()
@@ -248,9 +371,10 @@ export function analysisRows(did: unknown) {
     if (f.muted) m.muted.push(slot)
     mine.set(f.subject_did, m)
   }
+  const marks = targets.map(() => '?').join(',')
   const inter = new Map<string, { n: number; last: number; bySlot: Record<number, number> }>()
-  for (const r of db.prepare(`SELECT i.author_did, i.account_did, COUNT(*) n, MAX(i.at_ms) last FROM interactions i
-      JOIN ext_stats e ON e.did = i.author_did AND e.target_did = ? GROUP BY i.author_did, i.account_did`).all(target) as any[]) {
+  for (const r of db.prepare(`SELECT author_did, account_did, COUNT(*) n, MAX(at_ms) last FROM interactions
+      WHERE author_did IN (SELECT did FROM ext_stats WHERE target_did IN (${marks})) GROUP BY author_did, account_did`).all(...targets) as any[]) {
     const x = inter.get(r.author_did) ?? { n: 0, last: 0, bySlot: {} }
     x.n += r.n
     x.last = Math.max(x.last, r.last)
@@ -258,47 +382,73 @@ export function analysisRows(did: unknown) {
     if (slot) x.bySlot[slot] = r.n
     inter.set(r.author_did, x)
   }
-  const rows = (db.prepare('SELECT * FROM ext_stats WHERE target_did = ?').all(target) as any[])
-    .filter((r) => !own.has(r.did))
-    .map((r) => {
-      const m = mine.get(r.did) ?? { followedBy: [], followsBack: [], muted: [] }
-      const i = inter.get(r.did)
-      const total = (r.posts ?? 0) + (r.replies ?? 0) + (r.reposts ?? 0)
-      return {
-        did: r.did,
-        handle: r.handle,
-        displayName: r.display_name,
-        avatar: r.avatar,
-        followersCount: r.followers_count,
-        followedBy: m.followedBy.sort(),
-        followsBack: m.followsBack,
-        muted: m.muted,
-        followsTarget: !!r.follows_target,
-        read: !!r.read_ok,
-        capped: !!r.capped,
-        posts: r.posts ?? 0,
-        replies: r.replies ?? 0,
-        reposts: r.reposts ?? 0,
-        repostShare: r.read_ok && total ? r.reposts / total : null,
-        lastActiveMs: r.last_active_ms ?? 0,
-        interactions: i?.n ?? 0,
-        interactionsBySlot: i?.bySlot ?? {},
-        lastInteractionMs: i?.last ?? 0,
-        gone: false,
-      }
-    })
-  return { status: s, days: config.statsDays, rows }
+  const byDid = new Map<string, any>()
+  for (const r of db.prepare(`SELECT * FROM ext_stats WHERE target_did IN (${marks})`).all(...targets) as any[]) {
+    if (own.has(r.did)) continue
+    const cur = byDid.get(r.did)
+    if (!cur) {
+      byDid.set(r.did, { ...r, members: [r.target_did], backCount: r.follows_target ? 1 : 0 })
+      continue
+    }
+    cur.members.push(r.target_did)
+    if (r.follows_target) cur.backCount++
+    // Keep whichever copy has its numbers read
+    if (!cur.read_ok && r.read_ok) Object.assign(cur, { ...r, members: cur.members, backCount: cur.backCount })
+  }
+  return [...byDid.values()].map((r) => {
+    const m = mine.get(r.did) ?? { followedBy: [], followsBack: [], muted: [] }
+    const i = inter.get(r.did)
+    const total = (r.posts ?? 0) + (r.replies ?? 0) + (r.reposts ?? 0)
+    return {
+      did: r.did,
+      handle: r.handle,
+      displayName: r.display_name,
+      avatar: r.avatar,
+      followersCount: r.followers_count,
+      followedBy: m.followedBy.sort(),
+      followsBack: m.followsBack,
+      muted: m.muted,
+      followsTarget: r.backCount > 0,
+      followsTargetCount: r.backCount,
+      members: r.members,
+      groupCount: r.members.length,
+      read: !!r.read_ok,
+      capped: !!r.capped,
+      posts: r.posts ?? 0,
+      replies: r.replies ?? 0,
+      reposts: r.reposts ?? 0,
+      repostShare: r.read_ok && total ? r.reposts / total : null,
+      lastActiveMs: r.last_active_ms ?? 0,
+      interactions: i?.n ?? 0,
+      interactionsBySlot: i?.bySlot ?? {},
+      lastInteractionMs: i?.last ?? 0,
+      gone: false,
+    }
+  })
 }
 
-// Old analyses are dropped a day after they expire
+export function analysisRows(did: unknown) {
+  const s = analysisStatus(did)
+  return { status: s, days: config.statsDays, rows: buildRows([s.did]) }
+}
+
+export function analysisGroupRows(id: unknown) {
+  const s = analysisGroupStatus(id)
+  return { status: s, days: config.statsDays, rows: buildRows(groupMembers(s.id)) }
+}
+
+// Old analyses and groups are dropped a day after they expire
 export function pruneAnalyses() {
-  const old = db.prepare('SELECT target_did FROM ext_analyses WHERE started_at < ?').all(Date.now() - 2 * KEEP_MS) as any[]
+  const cutoff = Date.now() - 2 * KEEP_MS
+  const old = db.prepare('SELECT target_did FROM ext_analyses WHERE started_at < ?').all(cutoff) as any[]
   for (const a of old) {
     if (a.target_did === running) continue
     db.prepare('DELETE FROM ext_stats WHERE target_did = ?').run(a.target_did)
     db.prepare('DELETE FROM ext_analyses WHERE target_did = ?').run(a.target_did)
   }
+  if (!groupRunning) db.prepare('DELETE FROM ext_groups WHERE started_at < ?').run(cutoff)
 }
 
-// An analysis cut short by a restart is marked as such, so it can be run again
+// Anything cut short by a restart is marked as such, so it can be run again
 db.prepare("UPDATE ext_analyses SET error = 'Interrupted by a restart', finished_at = ? WHERE finished_at IS NULL").run(Date.now())
+db.prepare('UPDATE ext_groups SET finished_at = ? WHERE finished_at IS NULL').run(Date.now())
