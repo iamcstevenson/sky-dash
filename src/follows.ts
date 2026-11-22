@@ -1,5 +1,5 @@
 // Follow stats (14-day activity, overlap, follow-back, interactions) and the actions
-// that change your follow graph: unfollow, follow, mute, add to list.
+// that change your follow graph: unfollow, follow, mute. Lists are in lists.ts.
 import { config } from './config.ts'
 import { db } from './db.ts'
 import { accounts, type Account } from './accounts.ts'
@@ -173,66 +173,6 @@ export async function mute(body: any, muted: boolean) {
     if (muted) await a.agent.mute(did)
     else await a.agent.unmute(did)
     db.prepare('UPDATE follows SET muted = ? WHERE account_did = ? AND subject_did = ?').run(muted ? 1 : 0, a.did!, did)
-    return true
-  })
-}
-
-// Curated (not moderation) lists owned by one account
-export async function lists(slot: number) {
-  const [a] = signedIn([slot])
-  const out = []
-  let cursor: string | undefined
-  do {
-    const res = await a.agent.app.bsky.graph.getLists({ actor: a.did!, limit: 100, cursor })
-    for (const l of res.data.lists) {
-      if (l.purpose === 'app.bsky.graph.defs#curatelist') out.push({ uri: l.uri, name: l.name, count: l.listItemCount ?? 0 })
-    }
-    cursor = res.data.cursor
-  } while (cursor)
-  return out
-}
-
-export async function createList(body: any) {
-  const [a] = signedIn([Number(body.slot)])
-  const name = String(body.name ?? '').trim().slice(0, 64)
-  if (!name) throw Object.assign(new Error('Give the list a name'), { status: 400 })
-  const res = await a.agent.com.atproto.repo.createRecord({
-    repo: a.did!,
-    collection: 'app.bsky.graph.list',
-    record: {
-      $type: 'app.bsky.graph.list',
-      purpose: 'app.bsky.graph.defs#curatelist',
-      name,
-      description: 'Accounts to check on now and then (made with Skydash)',
-      createdAt: new Date().toISOString(),
-    },
-  })
-  return { uri: res.data.uri, name, count: 0 }
-}
-
-// Adds accounts to one of your lists, skipping ones already on it
-export async function addToList(body: any) {
-  const dids = checkBatch(body.dids)
-  const [a] = signedIn([Number(body.slot)])
-  const listUri = String(body.listUri ?? '')
-  if (!listUri.startsWith(`at://${a.did}/app.bsky.graph.list/`)) {
-    throw Object.assign(new Error('That list belongs to a different account'), { status: 400 })
-  }
-  const existing = new Set<string>()
-  let cursor: string | undefined
-  do {
-    const res = await a.agent.app.bsky.graph.getList({ list: listUri, limit: 100, cursor })
-    for (const item of res.data.items) existing.add(item.subject.did)
-    cursor = res.data.cursor
-  } while (cursor)
-
-  return each(dids, [a], async (acct, did) => {
-    if (existing.has(did)) return false
-    await acct.agent.com.atproto.repo.createRecord({
-      repo: acct.did!,
-      collection: 'app.bsky.graph.listitem',
-      record: { $type: 'app.bsky.graph.listitem', subject: did, list: listUri, createdAt: new Date().toISOString() },
-    })
     return true
   })
 }

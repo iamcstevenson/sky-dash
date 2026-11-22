@@ -24,6 +24,7 @@
     <button class="tab" data-tab="notifications"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0"/></svg><span class="tab-long">Notifications</span><span class="tab-short">Notifs</span><span class="tab-badge" id="notifBadge" hidden></span></button>
     <button class="tab" data-tab="keywords"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9h14M5 15h14M10 4L8 20M16 4l-2 16"/></svg><span class="tab-long">Keywords</span><span class="tab-short">Keywords</span></button>
     <button class="tab" data-tab="follows"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21a7 7 0 0 1 14 0M16 3.5a4 4 0 0 1 0 7.5M18 14a6 6 0 0 1 4 7"/></svg><span class="tab-long">Follows</span><span class="tab-short">Follows</span></button>
+    <button class="tab" data-tab="lists"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></svg><span class="tab-long">Lists</span><span class="tab-short">Lists</span></button>
     <button class="tab" data-tab="trending"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l6-6 4 4 8-8M15 7h6v6"/></svg><span class="tab-long">Trending</span><span class="tab-short">Trends</span></button>
     <button class="tab" data-tab="discover"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM15.5 8.5l-2 5-5 2 2-5z"/></svg><span class="tab-long">Discover</span><span class="tab-short">Discover</span></button>
   </nav>
@@ -141,6 +142,34 @@
         </table>
       </div>
       <div id="fvMore" class="feed-end"></div>
+    </section>
+
+    <section id="listsView" class="lists-view" hidden>
+      <div class="ls-head">
+        <div class="seg ls-account" id="lsAccount" aria-label="Whose lists"></div>
+        <button type="button" class="primary" id="lsNew">New list</button>
+      </div>
+      <form id="lsOpenForm" class="ls-open">
+        <input id="lsLink" type="url" placeholder="Open a shared list: paste a bsky.app list link" autocomplete="off">
+        <button type="submit" class="secondary">Open</button>
+      </form>
+      <div id="lsList" class="ls-list"></div>
+      <div id="lsDetail" class="ls-detail" hidden>
+        <button type="button" class="link-btn ls-back" id="lsBack">‹ All lists</button>
+        <div id="lsInfo" class="card ls-info"></div>
+        <div class="seg ls-mode" id="lsMode">
+          <button type="button" data-mode="posts" class="on">Posts</button>
+          <button type="button" data-mode="members">Members</button>
+        </div>
+        <div id="lsMembers" class="ls-members" hidden>
+          <div class="ls-add" id="lsAddWrap">
+            <input id="lsAdd" type="search" placeholder="Add people: search by name or handle" autocomplete="off">
+            <div id="lsAddResults" class="ls-results"></div>
+          </div>
+          <div id="lsMemberList"></div>
+          <div id="lsMembersMore" class="feed-end"></div>
+        </div>
+      </div>
     </section>
 
     <div class="filters" id="filters">

@@ -6,7 +6,8 @@ import { collector } from './jetstream.ts'
 import { backfill } from './backfill.ts'
 import { hydrate, forget, primaryAccount } from './hydrate.ts'
 import { listKeywords, addKeyword, removeKeyword, renameKeyword, normalizeQuery, pollKeywords, keywordStatus } from './keywords.ts'
-import { followStats, unfollow, follow, mute, lists, createList, addToList, profileCard } from './follows.ts'
+import { followStats, unfollow, follow, mute, profileCard } from './follows.ts'
+import { myLists, listMembers, listFeedRows, resolveListLink, createList, updateList, deleteList, addToList, removeFromList, copyList, searchActors } from './lists.ts'
 import { notifStatus } from './notifications.ts'
 import { trending, postsForTopic } from './trending.ts'
 import { isEnglish } from './lang.ts'
@@ -282,9 +283,24 @@ const routes: Record<string, Handler> = {
   'POST /api/follows/follow': async (_q, b) => follow(b),
   'POST /api/follows/mute': async (_q, b) => mute(b, true),
   'POST /api/follows/unmute': async (_q, b) => mute(b, false),
-  'GET /api/lists': async (q) => lists(Number(q.get('slot'))),
+
+  // ---------- lists ----------
+
+  'GET /api/lists': async (q) => myLists(Number(q.get('slot'))),
+  'GET /api/lists/members': async (q) => listMembers(q.get('list'), q.get('slot'), q.get('cursor')),
+  'GET /api/lists/feed': async (q) => {
+    const { rows, cursor } = await listFeedRows(q.get('list'), q.get('slot'), q.get('before'))
+    const { items } = await buildItems(rows, rows.length || 1)
+    return { items, cursor }
+  },
+  'GET /api/lists/resolve': async (q) => resolveListLink(q.get('link')),
+  'GET /api/lists/search': async (q) => searchActors(q.get('slot'), q.get('q') ?? ''),
   'POST /api/lists/create': async (_q, b) => createList(b),
+  'POST /api/lists/update': async (_q, b) => updateList(b),
+  'POST /api/lists/delete': async (_q, b) => deleteList(b),
   'POST /api/lists/add': async (_q, b) => addToList(b),
+  'POST /api/lists/remove': async (_q, b) => removeFromList(b),
+  'POST /api/lists/copy': async (_q, b) => copyList(b),
 
   // ---------- trending ----------
 

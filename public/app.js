@@ -6,7 +6,7 @@ const LETTERS = { 1: 'A', 2: 'B' }
 const state = {
   accounts: [], // signed-in accounts: { slot, handle, did }
   actAs: Number(safeGet('actAs')) || 1,
-  view: ['keywords', 'follows', 'trending', 'discover', 'notifications'].includes(safeGet('view')) ? safeGet('view') : 'following',
+  view: ['keywords', 'follows', 'lists', 'trending', 'discover', 'notifications'].includes(safeGet('view')) ? safeGet('view') : 'following',
   author: null, // { did, handle } when the Following tab shows one person's posts
   englishOnly: safeGet('englishOnly') !== '0', // on unless turned off
   kw: { list: [], groups: [], group: null, selected: new Set(), hideFollowed: false, showHidden: false, hours: 48, polling: false },
@@ -441,6 +441,8 @@ function showView(name) {
   const isTrending = name === 'trending'
   const isDiscover = name === 'discover'
   const isNotifications = name === 'notifications'
+  const isLists = name === 'lists'
+  $('#listsView').hidden = !isLists
   $('#notifView').hidden = !isNotifications
   $('#discoverView').hidden = !isDiscover
   $('#kwPanel').hidden = !isKeywords
@@ -448,15 +450,20 @@ function showView(name) {
   $('#trendPanel').hidden = !isTrending
   document.body.classList.toggle('wide', isFollows)
   // Trending shows its own controls; its post list only appears once a topic is picked
-  $('#filters').hidden = isFollows || isTrending || isDiscover || isNotifications
-  const showFeed = !isFollows && !isDiscover && !isNotifications && !(isTrending && !tr.topic)
+  $('#filters').hidden = isFollows || isTrending || isDiscover || isNotifications || isLists
+  const showFeed = !isFollows && !isDiscover && !isNotifications && !isLists && !(isTrending && !tr.topic)
   $('#feed').hidden = !showFeed
   $('#feedEnd').hidden = !showFeed
-  if (isFollows || isTrending || isDiscover || isNotifications) $('#newBanner').hidden = true
+  if (isFollows || isTrending || isDiscover || isNotifications || isLists) $('#newBanner').hidden = true
   $('#hideFollowedWrap').hidden = !isKeywords
   $('#showHiddenWrap').hidden = !isKeywords
   $('#whoFilter').hidden = isKeywords || !!state.author || state.accounts.length < 2
   renderAuthorChip()
+  if (isLists) {
+    if (ls.current) setLsMode(ls.mode)
+    else showLsDetail(false)
+    return loadLists()
+  }
   if (isFollows) return loadFollows()
   if (isDiscover) return loadDiscover()
   if (isNotifications) return loadNotifications(true)
@@ -1706,6 +1713,372 @@ async function runAction(kind, rows) {
   }
 }
 
+// ---------- lists ----------
+
+// Curated lists for one account at a time: see them, read one as a feed, change who's on it.
+// Lists other people made can be opened from a shared link (read and copy only).
+const ls = { slot: null, lists: [], current: null, mode: 'posts', members: [], cursor: null, loadingMembers: false, searchSeq: 0 }
+const lsOwned = () => ls.current?.ownerSlot != null
+
+VIEWS.lists = {
+  feed: '/api/lists/feed',
+  count: null,
+  query: () => new URLSearchParams({ list: ls.current?.uri ?? '', slot: state.actAs }),
+  done: () => "That's as far back as this list's feed goes.",
+  empty: () => 'No posts from the people on this list yet.',
+}
+
+function renderLsAccount() {
+  if (ls.slot == null || !state.accounts.some((a) => a.slot === ls.slot)) ls.slot = state.actAs
+  $('#lsAccount').hidden = state.accounts.length < 2
+  $('#lsAccount').innerHTML = state.accounts.map((a) =>
+    `<button type="button" data-slot="${a.slot}" class="${a.slot === ls.slot ? 'on' : ''}">${badge(a.slot)} @${esc(a.handle)}</button>`).join('')
+}
+
+async function loadLists() {
+  renderLsAccount()
+  const box = $('#lsList')
+  if (!ls.current) box.innerHTML = '<p class="dim">Loading lists…</p>'
+  try {
+    ls.lists = await api(`/api/lists?slot=${ls.slot}`)
+  } catch (err) {
+    box.innerHTML = `<p class="error">Couldn't load lists: ${esc(err.message)}</p>`
+    return
+  }
+  renderLists()
+}
+
+function renderLists() {
+  const box = $('#lsList')
+  box.innerHTML = ls.lists.length
+    ? ls.lists.map((l) => `<button type="button" class="card ls-item" data-open-list="${esc(l.uri)}">
+        <span class="ls-text"><b>${esc(l.name)}</b>${l.description ? `<small>${esc(l.description)}</small>` : ''}</span>
+        <span class="ls-count">${l.count} ${l.count === 1 ? 'person' : 'people'}</span></button>`).join('')
+    : `<p class="dim">@${esc(acctName(ls.slot))} has no lists yet. <b>New list</b> starts one; you can also add people from the Follows tab or a profile card.</p>`
+}
+
+function showLsDetail(open) {
+  $('#lsList').hidden = open
+  $('#lsOpenForm').hidden = open
+  $('.ls-head').hidden = open
+  $('#lsDetail').hidden = !open
+  const posts = open && ls.mode === 'posts'
+  $('#lsMembers').hidden = !open || ls.mode !== 'members'
+  $('#feed').hidden = !posts
+  $('#feedEnd').hidden = !posts
+}
+
+async function openList(uri) {
+  ls.current = { uri }
+  ls.members = []
+  ls.cursor = null
+  $('#lsInfo').innerHTML = '<p class="dim">Loading…</p>'
+  $('#lsMemberList').innerHTML = ''
+  showLsDetail(true)
+  try {
+    const data = await api(`/api/lists/members?list=${encodeURIComponent(uri)}&slot=${ls.slot}`)
+    if (ls.current?.uri !== uri) return
+    ls.current = data.list
+    ls.members = data.members
+    ls.cursor = data.cursor
+  } catch (err) {
+    $('#lsInfo').innerHTML = `<p class="error">Couldn't open this list: ${esc(err.message)}</p>`
+    return
+  }
+  if (ls.current.purpose !== 'app.bsky.graph.defs#curatelist') {
+    $('#lsInfo').innerHTML = '<p>This is a moderation list. Skydash only shows curated lists.</p>'
+    $('#lsMode').hidden = true
+    $('#lsMembers').hidden = true
+    $('#feed').hidden = true
+    $('#feedEnd').hidden = true
+    return
+  }
+  $('#lsMode').hidden = false
+  renderLsInfo()
+  setLsMode(ls.mode)
+}
+
+function renderLsInfo() {
+  const l = ls.current
+  const others = state.accounts.filter((a) => a.slot !== l.ownerSlot)
+  const copyBtns = others.map((a) => `<button type="button" class="pc-btn" data-ls="copy" data-slot="${a.slot}">Copy to ${badge(a.slot)} @${esc(a.handle)}</button>`).join('')
+  const byline = lsOwned() ? `Your list on ${badge(l.ownerSlot)} @${esc(acctName(l.ownerSlot))}` : `By @${esc(l.creator.handle)}`
+  $('#lsInfo').innerHTML = `<h2>${esc(l.name)}</h2>
+    <div class="dim">${byline} · ${l.count ?? ls.members.length} ${(l.count ?? ls.members.length) === 1 ? 'person' : 'people'}</div>
+    ${l.description ? `<p>${esc(l.description)}</p>` : ''}
+    <div class="ls-acts">
+      ${lsOwned() ? '<button type="button" class="pc-btn" data-ls="edit">Rename or describe</button>' : ''}
+      ${copyBtns}
+      <a class="pc-btn" href="${esc(listWebUrl(l))}" target="_blank" rel="noopener">Open in Bluesky ↗</a>
+      ${lsOwned() ? '<button type="button" class="pc-btn unfollow" data-ls="delete">Delete list</button>' : ''}
+    </div>`
+  $('#lsAddWrap').hidden = !lsOwned()
+}
+
+function listWebUrl(l) {
+  return `https://bsky.app/profile/${l.creator?.handle || l.creator?.did}/lists/${l.uri.split('/').pop()}`
+}
+
+function setLsMode(mode) {
+  ls.mode = mode
+  $('#lsMode').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode))
+  showLsDetail(true)
+  if (mode === 'posts') loadFeed(true)
+  else renderLsMembers()
+}
+
+function renderLsMembers() {
+  $('#lsMemberList').innerHTML = ls.members.map((m) => `<div class="ls-person">
+      <img loading="lazy" src="${esc(m.avatar ?? '')}" alt="" data-profile="${esc(m.did)}">
+      <span class="ls-text" data-profile="${esc(m.did)}"><b>${esc(m.displayName || m.handle)}</b><small>@${esc(m.handle)}</small></span>
+      ${lsOwned() ? `<button type="button" class="link-btn bad" data-ls-remove="${esc(m.itemUri)}" title="Take them off this list">Remove</button>` : ''}
+    </div>`).join('')
+  $('#lsMembersMore').innerHTML = ls.cursor
+    ? '<button type="button" class="secondary" id="lsMoreMembers">Show more</button>'
+    : ls.members.length ? '' : (lsOwned() ? 'Nobody on this list yet. Search above to add people.' : 'Nobody on this list.')
+}
+
+async function moreMembers() {
+  if (!ls.cursor || ls.loadingMembers) return
+  ls.loadingMembers = true
+  try {
+    const data = await api(`/api/lists/members?list=${encodeURIComponent(ls.current.uri)}&slot=${ls.slot}&cursor=${encodeURIComponent(ls.cursor)}`)
+    ls.members.push(...data.members)
+    ls.cursor = data.cursor
+    renderLsMembers()
+  } catch (err) {
+    toast(err.message)
+  } finally {
+    ls.loadingMembers = false
+  }
+}
+
+// Re-reads the open list after a change, keeping the current view
+async function refreshOpenList() {
+  const data = await api(`/api/lists/members?list=${encodeURIComponent(ls.current.uri)}&slot=${ls.slot}`)
+  ls.current = data.list
+  ls.members = data.members
+  ls.cursor = data.cursor
+  renderLsInfo()
+  if (ls.mode === 'members') renderLsMembers()
+}
+
+function editListDialog() {
+  const l = ls.current
+  $('#adTitle').textContent = 'Rename or describe list'
+  $('#adBody').innerHTML = `
+    <label class="ad-field">Name <input id="lsEditName" maxlength="64" value="${esc(l.name)}"></label>
+    <label class="ad-field">Description <textarea id="lsEditDesc" rows="3" maxlength="300">${esc(l.description)}</textarea></label>
+    <div class="ad-foot"><button class="secondary" data-close>Cancel</button><button class="primary" id="lsEditSave">Save</button></div>`
+  $('#lsEditSave').onclick = async (e) => {
+    e.target.disabled = true
+    try {
+      await api('/api/lists/update', { slot: l.ownerSlot, listUri: l.uri, name: $('#lsEditName').value, description: $('#lsEditDesc').value })
+      $('#actionDialog').close()
+      toast('List updated')
+      await refreshOpenList()
+    } catch (err) {
+      toast(err.message)
+    } finally {
+      e.target.disabled = false
+    }
+  }
+  $('#actionDialog').showModal()
+}
+
+function newListDialog() {
+  $('#adTitle').textContent = `New list for @${acctName(ls.slot)}`
+  $('#adBody').innerHTML = `
+    <label class="ad-field">Name <input id="lsNewName" maxlength="64" placeholder="e.g. Cardinals writers"></label>
+    <label class="ad-field">Description (optional) <textarea id="lsNewDesc" rows="3" maxlength="300"></textarea></label>
+    <div class="ad-foot"><button class="secondary" data-close>Cancel</button><button class="primary" id="lsNewSave">Create</button></div>`
+  $('#lsNewSave').onclick = async (e) => {
+    e.target.disabled = true
+    try {
+      const l = await api('/api/lists/create', { slot: ls.slot, name: $('#lsNewName').value, description: $('#lsNewDesc').value })
+      $('#actionDialog').close()
+      toast(`Created “${l.name}”`)
+      ls.mode = 'members'
+      openList(l.uri)
+    } catch (err) {
+      toast(err.message)
+    } finally {
+      e.target.disabled = false
+    }
+  }
+  $('#actionDialog').showModal()
+  $('#lsNewName').focus()
+}
+
+// "Add to list…" from a profile card: pick the account and list (or start a new one)
+function openAddToList(did, handle) {
+  const first = state.actAs
+  $('#adTitle').textContent = `Add @${handle} to a list`
+  $('#adBody').innerHTML = `
+    <label class="ad-field">Account <select id="atlAcct">${state.accounts.map((a) => `<option value="${a.slot}" ${a.slot === first ? 'selected' : ''}>${LETTERS[a.slot]} · @${esc(a.handle)}</option>`).join('')}</select></label>
+    <label class="ad-field">List <select id="atlList"><option>Loading…</option></select></label>
+    <label class="ad-field" id="atlNewWrap" hidden>New list name <input id="atlNew" maxlength="64"></label>
+    <div class="ad-foot"><button class="secondary" data-close>Cancel</button><button class="primary" id="atlGo">Add</button></div>`
+  const fill = async () => {
+    const sel = $('#atlList')
+    sel.innerHTML = '<option>Loading…</option>'
+    try {
+      const lists = await api(`/api/lists?slot=${$('#atlAcct').value}`)
+      sel.innerHTML = lists.map((l) => `<option value="${esc(l.uri)}">${esc(l.name)} (${l.count})</option>`).join('') + '<option value="__new">+ New list…</option>'
+    } catch (err) {
+      sel.innerHTML = '<option value="__new">+ New list…</option>'
+      toast(err.message)
+    }
+    sel.dispatchEvent(new Event('change'))
+  }
+  $('#atlAcct').onchange = fill
+  $('#atlList').onchange = () => ($('#atlNewWrap').hidden = $('#atlList').value !== '__new')
+  $('#atlGo').onclick = async (e) => {
+    e.target.disabled = true
+    try {
+      const slot = Number($('#atlAcct').value)
+      let listUri = $('#atlList').value
+      if (listUri === '__new') listUri = (await api('/api/lists/create', { slot, name: $('#atlNew').value })).uri
+      const res = await api('/api/lists/add', { slot, listUri, dids: [did] })
+      $('#actionDialog').close()
+      toast(res.done ? `Added @${handle} to the list` : `@${handle} is already on that list`)
+      if (state.view === 'lists' && ls.current?.uri === listUri) refreshOpenList()
+    } catch (err) {
+      toast(err.message)
+    } finally {
+      e.target.disabled = false
+    }
+  }
+  fill()
+  $('#actionDialog').showModal()
+}
+
+$('#lsAccount').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-slot]')
+  if (!b) return
+  ls.slot = Number(b.dataset.slot)
+  ls.current = null
+  showLsDetail(false)
+  loadLists()
+})
+$('#lsNew').addEventListener('click', newListDialog)
+$('#lsList').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-open-list]')
+  if (b) openList(b.dataset.openList)
+})
+$('#lsBack').addEventListener('click', () => {
+  ls.current = null
+  showLsDetail(false)
+  loadLists()
+})
+$('#lsMode').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-mode]')
+  if (b && b.dataset.mode !== ls.mode) setLsMode(b.dataset.mode)
+})
+$('#lsOpenForm').addEventListener('submit', async (e) => {
+  e.preventDefault()
+  const link = $('#lsLink').value.trim()
+  if (!link) return
+  try {
+    const { uri } = await api(`/api/lists/resolve?link=${encodeURIComponent(link)}`)
+    $('#lsLink').value = ''
+    openList(uri)
+  } catch (err) {
+    toast(err.message)
+  }
+})
+$('#lsMembersMore').addEventListener('click', (e) => {
+  if (e.target.closest('#lsMoreMembers')) moreMembers()
+})
+$('#lsInfo').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-ls]')
+  if (!b) return
+  const l = ls.current
+  if (b.dataset.ls === 'edit') return editListDialog()
+  if (b.dataset.ls === 'delete') {
+    const n = l.count ?? ls.members.length
+    if (!confirm(`Delete the list “${l.name}” (${n} ${n === 1 ? 'person' : 'people'})? This removes it from Bluesky and can't be undone.`)) return
+    b.disabled = true
+    try {
+      await api('/api/lists/delete', { slot: l.ownerSlot, listUri: l.uri })
+      toast(`Deleted “${l.name}”`)
+      ls.current = null
+      showLsDetail(false)
+      loadLists()
+    } catch (err) {
+      toast(err.message)
+      b.disabled = false
+    }
+  }
+  if (b.dataset.ls === 'copy') {
+    const to = Number(b.dataset.slot)
+    if (!confirm(`Make a copy of “${l.name}” on @${acctName(to)}?`)) return
+    b.disabled = true
+    try {
+      const copy = await api('/api/lists/copy', { listUri: l.uri, fromSlot: ls.slot, toSlot: to })
+      toast(`Copied “${copy.name}” with ${copy.count} ${copy.count === 1 ? 'person' : 'people'} to @${acctName(to)}`)
+    } catch (err) {
+      toast(err.message)
+    } finally {
+      b.disabled = false
+    }
+  }
+})
+$('#lsMemberList').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-ls-remove]')
+  if (!b) return
+  b.disabled = true
+  try {
+    await api('/api/lists/remove', { slot: ls.current.ownerSlot, itemUri: b.dataset.lsRemove })
+    ls.members = ls.members.filter((m) => m.itemUri !== b.dataset.lsRemove)
+    if (ls.current.count != null) ls.current.count--
+    renderLsMembers()
+    renderLsInfo()
+  } catch (err) {
+    toast(err.message)
+    b.disabled = false
+  }
+})
+{
+  let timer
+  $('#lsAdd').addEventListener('input', (e) => {
+    clearTimeout(timer)
+    const q = e.target.value.trim()
+    if (!q) return ($('#lsAddResults').innerHTML = '')
+    timer = setTimeout(async () => {
+      const seq = ++ls.searchSeq
+      try {
+        const people = await api(`/api/lists/search?slot=${ls.current.ownerSlot}&q=${encodeURIComponent(q)}`)
+        if (seq !== ls.searchSeq) return
+        const on = new Set(ls.members.map((m) => m.did))
+        $('#lsAddResults').innerHTML = people.map((p) => `<div class="ls-person">
+            <img src="${esc(p.avatar ?? '')}" alt="">
+            <span class="ls-text"><b>${esc(p.displayName || p.handle)}</b><small>@${esc(p.handle)}</small></span>
+            ${on.has(p.did) ? '<span class="dim">On the list</span>' : `<button type="button" class="secondary" data-ls-add="${esc(p.did)}">Add</button>`}
+          </div>`).join('') || '<div class="ls-person dim">No one found</div>'
+      } catch (err) {
+        toast(err.message)
+      }
+    }, 250)
+  })
+  $('#lsAddResults').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-ls-add]')
+    if (!b) return
+    b.disabled = true
+    try {
+      await api('/api/lists/add', { slot: ls.current.ownerSlot, listUri: ls.current.uri, dids: [b.dataset.lsAdd] })
+      b.replaceWith(Object.assign(document.createElement('span'), { className: 'dim', textContent: 'Added' }))
+      await refreshOpenList()
+    } catch (err) {
+      toast(err.message)
+      b.disabled = false
+    }
+  })
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#lsAddWrap')) $('#lsAddResults').innerHTML = ''
+  })
+}
+
 // ---------- actions ----------
 
 async function refreshPost(uri) {
@@ -2526,6 +2899,7 @@ function renderProfileCard(p) {
     <div class="pc-actions">
       ${buttons}${muteBtn}
       ${following.length ? '<button class="pc-btn" data-pc="posts">Their posts</button>' : ''}
+      ${isSelf ? '' : '<button class="pc-btn" data-pc="list">Add to list…</button>'}
       <a class="pc-btn" href="https://bsky.app/profile/${esc(p.handle || p.did)}" target="_blank" rel="noopener">Open in Bluesky ↗</a>
     </div>`
 }
@@ -2673,6 +3047,9 @@ $('#profileCard').addEventListener('click', async (e) => {
       case 'posts':
         closeProfileCard()
         return showAuthor(did, p?.handle ?? did)
+      case 'list':
+        closeProfileCard()
+        return openAddToList(did, p?.handle ?? did)
     }
     const fresh = await fetchProfile(did, true)
     markUnfollowed(did, Object.values(fresh.relationship).some((r) => r.following))
