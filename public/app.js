@@ -1674,6 +1674,7 @@ async function startAnalysis(handle, refresh = false) {
     fv.selected.clear()
     fv.overlap = 'new'
     fv.shown = 150
+    fv.sort = { key: 'posts', dir: -1 } // most active first, for finding people
     safeSet('fvTarget', s.did)
     $('#fvAnalyzeInput').value = ''
     await loadAnalysis()
@@ -1697,6 +1698,7 @@ async function loadAnalysis() {
     fv.days = data.days
     const known = new Set(fv.rows.map((r) => r.did))
     for (const d of fv.selected) if (!known.has(d)) fv.selected.delete(d)
+    $('#fvNote').innerHTML = ''
     renderTargetBar()
     renderOverlap()
     renderFollows()
@@ -1756,6 +1758,7 @@ $('#fvRecent').addEventListener('click', async (e) => {
   if (!b) return
   fv.target = { did: b.dataset.recent }
   fv.overlap = 'new'
+  fv.sort = { key: 'posts', dir: -1 }
   fv.selected.clear()
   safeSet('fvTarget', b.dataset.recent)
   loadAnalysis()
@@ -1765,6 +1768,7 @@ $('#fvTargetBar').addEventListener('click', (e) => {
   if (act === 'back') {
     fv.selected.clear()
     fv.overlap = 'all'
+    fv.sort = { key: 'lastActiveMs', dir: 1 } // quietest first, for tidying up
     setFollowsMode('mine')
     loadFollows()
   }
