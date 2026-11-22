@@ -61,6 +61,22 @@ async function chunked<T>(items: T[], fn: (chunk: T[]) => Promise<unknown>) {
   for (let i = 0; i < items.length; i += WRITE_CHUNK) await fn(items.slice(i, i + WRITE_CHUNK))
 }
 
+// The account's own member records for one list, read from its repository. Bluesky's index can lag a few
+// seconds behind a write, so checks for duplicates and deletions use these instead.
+async function repoItems(a: Account, listUri: string) {
+  const out: { rkey: string; subject: string }[] = []
+  let cursor: string | undefined
+  do {
+    const res = await a.agent.com.atproto.repo.listRecords({ repo: a.did!, collection: ITEM, limit: 100, cursor })
+    for (const r of res.data.records) {
+      const v = r.value as any
+      if (v?.list === listUri) out.push({ rkey: r.uri.split('/').pop()!, subject: String(v.subject) })
+    }
+    cursor = res.data.records.length ? res.data.cursor : undefined
+  } while (cursor)
+  return out
+}
+
 // ---------- reading ----------
 
 // Curated lists owned by one account
@@ -183,13 +199,7 @@ export async function updateList(body: any) {
 export async function deleteList(body: any) {
   const a = signedIn(body.slot)
   const { rkey, uri } = ownList(a, body.listUri)
-  const itemKeys: string[] = []
-  let cursor: string | undefined
-  do {
-    const res = await a.agent.com.atproto.repo.listRecords({ repo: a.did!, collection: ITEM, limit: 100, cursor })
-    for (const r of res.data.records) if ((r.value as any)?.list === uri) itemKeys.push(r.uri.split('/').pop()!)
-    cursor = res.data.records.length ? res.data.cursor : undefined
-  } while (cursor)
+  const itemKeys = (await repoItems(a, uri)).map((i) => i.rkey)
   await chunked(itemKeys, (keys) =>
     a.agent.com.atproto.repo.applyWrites({
       repo: a.did!,
@@ -206,7 +216,7 @@ export async function addToList(body: any) {
   const { uri } = ownList(a, body.listUri)
   if (!Array.isArray(body.dids) || !body.dids.length) throw new ListError(400, 'No accounts selected')
   if (body.dids.length > MAX_BATCH) throw new ListError(400, `At most ${MAX_BATCH} at a time`)
-  const existing = new Set(await allMemberDids(a, uri))
+  const existing = new Set((await repoItems(a, uri)).map((i) => i.subject))
   const toAdd = [...new Set(body.dids.map(String) as string[])].filter((d) => d.startsWith('did:') && !existing.has(d))
   const now = new Date().toISOString()
   await chunked(toAdd, (dids) =>
@@ -222,12 +232,19 @@ export async function addToList(body: any) {
   return { done: toAdd.length, failed: [] }
 }
 
+// Takes someone off a list. Removes every record for them on it, in case an earlier add was doubled.
 export async function removeFromList(body: any) {
   const a = signedIn(body.slot)
   const p = parseUri(body.itemUri)
   if (p.collection !== ITEM || p.did !== a.did) throw new ListError(403, 'That entry belongs to a different account')
-  await a.agent.com.atproto.repo.deleteRecord({ repo: a.did!, collection: ITEM, rkey: p.rkey })
-  return { ok: true }
+  const { uri } = ownList(a, body.listUri)
+  const did = String(body.did ?? '')
+  const keys = new Set([p.rkey, ...(await repoItems(a, uri)).filter((i) => did && i.subject === did).map((i) => i.rkey)])
+  await a.agent.com.atproto.repo.applyWrites({
+    repo: a.did!,
+    writes: [...keys].map((k) => ({ $type: 'com.atproto.repo.applyWrites#delete', collection: ITEM, rkey: k })),
+  })
+  return { ok: true, removed: keys.size }
 }
 
 // Copies any list (yours or a shared one) to one of your accounts as a new curated list
@@ -236,7 +253,7 @@ export async function copyList(body: any) {
   ownOrAny(String(body.listUri ?? ''))
   const from = reader(body.fromSlot)
   const src = await from.agent.app.bsky.graph.getList({ list: String(body.listUri), limit: 1 })
-  const dids = (await allMemberDids(from, String(body.listUri))).filter((d) => d !== to.did)
+  const dids = [...new Set(await allMemberDids(from, String(body.listUri)))].filter((d) => d !== to.did)
   const created = await createList({ slot: to.slot, name: body.name ?? src.data.list.name, description: src.data.list.description ?? '' })
   const now = new Date().toISOString()
   await chunked(dids, (chunk) =>

@@ -1831,7 +1831,7 @@ function renderLsMembers() {
   $('#lsMemberList').innerHTML = ls.members.map((m) => `<div class="ls-person">
       <img loading="lazy" src="${esc(m.avatar ?? '')}" alt="" data-profile="${esc(m.did)}">
       <span class="ls-text" data-profile="${esc(m.did)}"><b>${esc(m.displayName || m.handle)}</b><small>@${esc(m.handle)}</small></span>
-      ${lsOwned() ? `<button type="button" class="link-btn bad" data-ls-remove="${esc(m.itemUri)}" title="Take them off this list">Remove</button>` : ''}
+      ${lsOwned() ? `<button type="button" class="link-btn bad" data-ls-remove="${esc(m.itemUri)}" data-did="${esc(m.did)}" title="Take them off this list">Remove</button>` : ''}
     </div>`).join('')
   $('#lsMembersMore').innerHTML = ls.cursor
     ? '<button type="button" class="secondary" id="lsMoreMembers">Show more</button>'
@@ -2029,7 +2029,7 @@ $('#lsMemberList').addEventListener('click', async (e) => {
   if (!b) return
   b.disabled = true
   try {
-    await api('/api/lists/remove', { slot: ls.current.ownerSlot, itemUri: b.dataset.lsRemove })
+    await api('/api/lists/remove', { slot: ls.current.ownerSlot, listUri: ls.current.uri, itemUri: b.dataset.lsRemove, did: b.dataset.did })
     ls.members = ls.members.filter((m) => m.itemUri !== b.dataset.lsRemove)
     if (ls.current.count != null) ls.current.count--
     renderLsMembers()
