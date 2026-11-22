@@ -1350,11 +1350,19 @@ const fv = {
   target: null,
   pollTimer: null,
 }
-const isExt = () => fv.mode === 'ext'
+// 'ext' is one other account's follows, 'group' several accounts' together
+const isExt = () => fv.mode === 'ext' || fv.mode === 'group'
+const isGroup = () => fv.mode === 'group'
+const targetKey = (t) => (t?.kind === 'group' ? t.id : t?.did)
+const groupSize = () => fv.target?.members?.length ?? 0
+fv.atLeastN = 2
 // Reopen the last analysis after a reload (if it's gone, the Follows tab falls back to your own follows)
-if (safeGet('fvTarget')) {
-  fv.mode = 'ext'
-  fv.target = { did: safeGet('fvTarget') }
+{
+  const key = safeGet('fvTarget')
+  if (key) {
+    fv.target = key.startsWith('did:') ? { kind: 'single', did: key } : { kind: 'group', id: key }
+    fv.mode = fv.target.kind === 'group' ? 'group' : 'ext'
+  }
 }
 
 const listsOf = (did) => fv.lists.byDid[did] ?? []
@@ -1457,6 +1465,7 @@ function filteredFollows() {
     if (fv.quick.has('reposty') && !(r.repostShare >= 0.8 && r.posts + r.replies + r.reposts >= 5)) return false
     if (fv.quick.has('muted') && !r.muted.length) return false
     if (fv.quick.has('gone') && !r.gone) return false
+    if (isGroup() && fv.quick.has('atleast') && (r.groupCount ?? 0) < fv.atLeastN) return false
     if (fv.listFilter === 'none' && listsOf(r.did).length) return false
     if (fv.listFilter && fv.listFilter !== 'none' && !listsOf(r.did).includes(fv.listFilter)) return false
     return true
@@ -1495,7 +1504,9 @@ function renderFollows() {
     const d = daysAgo(r.lastActiveMs)
     const last = d === null ? `<span class="dim" title="No posts seen">—</span>` : d === 0 ? 'today' : `${d}d`
     const share = r.repostShare === null ? '<span class="dim">—</span>' : `${Math.round(r.repostShare * 100)}%`
-    const back = isExt()
+    const back = isGroup()
+      ? (r.followsTargetCount ? `${r.followsTargetCount} of ${groupSize()}` : '<span class="dim">0</span>')
+      : isExt()
       ? (r.followsTarget ? `<span title="Follows @${esc(fv.target?.handle ?? '')}">✓</span>` : `<span class="dim" title="Doesn't follow @${esc(fv.target?.handle ?? '')}">✕</span>`)
       : r.followedBy.map((s) => r.followsBack.includes(s) ? badge(s, `Follows ${acctName(s)}`) : `<span class="dim" title="Doesn't follow ${esc(acctName(s))}">${LETTERS[s]}✕</span>`).join(' ')
     // In another account's view, numbers not read yet show a dash, and capped ones a "+"
@@ -1512,6 +1523,7 @@ function renderFollows() {
           ? `<b class="gone" title="Bluesky no longer shows this profile">Deleted or deactivated</b><small>${esc(r.handle ? '@' + r.handle : r.did)}</small>`
           : `<b data-profile="${esc(r.did)}">${esc(r.displayName || r.handle || r.did)}</b><small data-profile="${esc(r.did)}">${r.handle ? '@' + esc(r.handle) : 'Loading profile…'}${r.muted.length ? ' · muted' : ''}</small>`}</div></div></td>
       <td data-label="${isExt() ? 'You' : 'By'}">${r.followedBy.map((s) => badge(s)).join(' ') || (isExt() ? '<span class="dim">—</span>' : '')}</td>
+      ${isGroup() ? `<td class="num" data-label="Followed by" title="${esc(groupWho(r))}">${r.groupCount} of ${groupSize()}</td>` : ''}
       <td class="num" data-label="Posts">${num(r.posts)}</td>
       <td class="num" data-label="Replies">${num(r.replies)}</td>
       <td class="num" data-label="Reposts">${num(r.reposts)}</td>
@@ -1564,7 +1576,10 @@ $('#fvOverlap').addEventListener('click', (e) => {
 })
 $('#fvSearch').addEventListener('input', (e) => { fv.search = e.target.value.trim(); fv.shown = 150; renderFollows() })
 $('#fvQuick').addEventListener('change', (e) => {
-  if (e.target.id === 'fvLowN') {
+  if (e.target.id === 'fvAtLeastN') {
+    fv.atLeastN = Math.min(10, Math.max(1, Number(e.target.value) || 1))
+    if (!fv.quick.has('atleast')) return
+  } else if (e.target.id === 'fvLowN') {
     fv.lowN = Math.max(0, Number(e.target.value) || 0)
     if (!fv.quick.has('low')) return
   } else if (e.target.dataset.q) {
@@ -1574,6 +1589,8 @@ $('#fvQuick').addEventListener('change', (e) => {
   renderFollows()
 })
 $('#fvLowN').addEventListener('click', (e) => e.preventDefault()) // typing in it shouldn't toggle the chip
+$('#fvAtLeastN').addEventListener('click', (e) => e.preventDefault())
+$('#fvAtLeastN').addEventListener('focus', (e) => e.target.select())
 $('#fvLowN').addEventListener('focus', (e) => e.target.select())
 
 // ---------- sorting by several columns ----------
@@ -1581,6 +1598,7 @@ $('#fvLowN').addEventListener('focus', (e) => e.target.select())
 const DEFAULT_SORTS = {
   mine: [{ key: 'lastActiveMs', dir: 1 }], // quietest first, for tidying up
   ext: [{ key: 'posts', dir: -1 }], // most active first, for finding people
+  group: [{ key: 'groupCount', dir: -1 }, { key: 'posts', dir: -1 }], // followed by most of the group, then most active
 }
 const MAX_SORTS = 4
 // Numbers sort high-to-low first, except name and "last active" (oldest, i.e. quietest, first)
@@ -1735,20 +1753,21 @@ function isNewToMe(r) {
 function setFollowsMode(mode) {
   if (fv.mode !== mode || !fv.sorts.length) fv.sorts = loadSorts(mode)
   fv.mode = mode
-  document.querySelectorAll('#followsView [data-mine-only]').forEach((el) => {
-    el.hidden = mode === 'ext'
+  const ext = mode !== 'mine'
+  document.querySelectorAll('#followsView [data-mine-only], #followsView [data-group-only]').forEach((el) => {
+    const show = el.hasAttribute('data-group-only') ? mode === 'group' : !ext
+    el.hidden = !show
     const box = el.querySelector('input[data-q]')
-    if (box && mode === 'ext' && box.checked) {
+    if (box && !show && box.checked) {
       box.checked = false
       fv.quick.delete(box.dataset.q)
     }
   })
   const th = (key) => document.querySelector(`.fv-table th[data-sort="${key}"]`)
-  th('followedBy').dataset.base = mode === 'ext' ? 'You' : 'By'
-  th('followedBy').title = mode === 'ext' ? 'Which of your accounts follow them' : 'Which of your accounts follow them'
-  th('followsBack').dataset.base = mode === 'ext' ? 'Follows them' : 'Follows you'
-  th('followsBack').title = mode === 'ext' ? `Whether they follow @${fv.target?.handle ?? ''} back` : 'Which of your accounts they follow'
-  th('interactions').title = mode === 'ext' ? 'Their likes, replies, reposts, quotes and mentions of your accounts' : 'Likes, replies, reposts, quotes and mentions of your accounts'
+  th('followedBy').dataset.base = ext ? 'You' : 'By'
+  th('followsBack').dataset.base = ext ? 'Follows them' : 'Follows you'
+  th('followsBack').title = mode === 'group' ? 'How many of the group they follow back' : ext ? `Whether they follow @${fv.target?.handle ?? ''} back` : 'Which of your accounts they follow'
+  th('interactions').title = ext ? 'Their likes, replies, reposts, quotes and mentions of your accounts' : 'Likes, replies, reposts, quotes and mentions of your accounts'
   if (mode === 'mine') {
     clearTimeout(fv.pollTimer)
     fv.target = null
@@ -1757,16 +1776,36 @@ function setFollowsMode(mode) {
   }
 }
 
+// Who in the group follows this row, for the "Followed by" tooltip
+function groupWho(r) {
+  const names = new Map((fv.target?.members ?? []).map((m) => [m.did, `@${m.handle}`]))
+  return (r.members ?? []).map((d) => names.get(d) ?? d).join(', ')
+}
+
+function openTarget(t) {
+  fv.target = t
+  fv.selected.clear()
+  fv.overlap = 'new'
+  fv.shown = 150
+  safeSet('fvTarget', targetKey(t))
+  return loadAnalysis()
+}
+
 async function startAnalysis(handle, refresh = false) {
   try {
     const s = await api('/api/analyze', { handle, refresh })
-    fv.target = s
-    fv.selected.clear()
-    fv.overlap = 'new'
-    fv.shown = 150
-    safeSet('fvTarget', s.did)
     $('#fvAnalyzeInput').value = ''
-    await loadAnalysis()
+    await openTarget(s)
+  } catch (err) {
+    toast(err.message)
+  }
+}
+
+async function startGroup(dids, refresh = false) {
+  try {
+    const s = await api('/api/analyze/group', { dids, refresh })
+    await openTarget(s)
+    window.scrollTo({ top: 0 })
   } catch (err) {
     toast(err.message)
   }
@@ -1774,19 +1813,22 @@ async function startAnalysis(handle, refresh = false) {
 
 let analysisSeq = 0
 async function loadAnalysis() {
-  const did = fv.target?.did
-  if (!did) return setFollowsMode('mine'), loadFollows()
+  const t = fv.target
+  if (!targetKey(t)) return setFollowsMode('mine'), loadFollows()
+  const group = t.kind === 'group'
   const seq = ++analysisSeq
-  setFollowsMode('ext')
+  setFollowsMode(group ? 'group' : 'ext')
   clearTimeout(fv.pollTimer)
   try {
-    const [data] = await Promise.all([api(`/api/analyze/rows?did=${encodeURIComponent(did)}`), fv.lists.lists.length ? null : refreshMemberships()])
+    const url = group ? `/api/analyze/group/rows?id=${encodeURIComponent(t.id)}` : `/api/analyze/rows?did=${encodeURIComponent(t.did)}`
+    const [data] = await Promise.all([api(url), fv.lists.lists.length ? null : refreshMemberships()])
     if (seq !== analysisSeq || !isExt()) return
     fv.target = data.status
     fv.rows = data.rows
     fv.days = data.days
     const known = new Set(fv.rows.map((r) => r.did))
     for (const d of fv.selected) if (!known.has(d)) fv.selected.delete(d)
+    $('#fvAtLeastN').max = String(groupSize() || 10)
     $('#fvNote').innerHTML = ''
     renderTargetBar()
     renderOverlap()
@@ -1803,22 +1845,28 @@ async function loadAnalysis() {
 
 function renderTargetBar() {
   const t = fv.target
+  const group = t.kind === 'group'
   const pct = t.total ? Math.round((t.done / t.total) * 100) : 0
   const when = t.finishedAt ? `read ${timeAgo(t.finishedAt)}` : ''
+  const head = group
+    ? `<div class="fv-target-avatars">${t.members.slice(0, 5).map((m) => `<img src="${esc(m.avatar ?? '')}" alt="" title="@${esc(m.handle)}" data-profile="${esc(m.did)}">`).join('')}</div>
+      <div class="fv-target-names"><b>Who these ${t.members.length} accounts follow</b>
+        <small>${t.members.map((m) => `@${esc(m.handle)}`).join(', ')} · ${fv.rows.length.toLocaleString()} accounts${when ? ` · ${when}` : ''}</small></div>`
+    : `<img src="${esc(t.avatar ?? '')}" alt="" data-profile="${esc(t.did)}">
+      <div class="fv-target-names"><b>Who ${esc(t.displayName || t.handle)} follows</b><small>@${esc(t.handle)} · ${t.total.toLocaleString()} accounts${when ? ` · ${when}` : ''}</small></div>`
+  const reading = group ? t.members.find((m) => !m.finishedAt) : null
   $('#fvTargetBar').hidden = false
   $('#fvTargetBar').innerHTML = `
-    <div class="fv-target-head">
-      <img src="${esc(t.avatar ?? '')}" alt="" data-profile="${esc(t.did)}">
-      <div class="fv-target-names"><b>Who ${esc(t.displayName || t.handle)} follows</b><small>@${esc(t.handle)} · ${t.total.toLocaleString()} accounts${when ? ` · ${when}` : ''}</small></div>
+    <div class="fv-target-head">${head}
       <div class="fv-target-acts">
         ${t.running ? '' : '<button type="button" class="secondary" data-target="refresh">Refresh</button>'}
         <button type="button" class="secondary" data-target="back">Back to my follows</button>
       </div>
     </div>
     ${t.running ? `<div class="fv-progress" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><span style="width:${pct}%"></span></div>
-      <div class="fv-note">Reading each account's last ${fv.days} days: ${t.done.toLocaleString()} of ${t.total.toLocaleString()}. About ${Math.max(1, Math.ceil((t.total - t.done) / 400))} min left; you can use the rows already read.</div>` : ''}
+      <div class="fv-note">${reading ? `Reading @${esc(reading.handle)}'s follows (${t.members.indexOf(reading) + 1} of ${t.members.length}). ` : ''}Each account's last ${fv.days} days: ${t.done.toLocaleString()} of ${t.total.toLocaleString()}. At most about ${Math.max(1, Math.ceil((t.total - t.done) / 400))} min left (less where they follow the same people); you can use the rows already read.</div>` : ''}
     ${t.error ? `<div class="error">${esc(t.error)}. <button type="button" class="link-btn" data-target="refresh">Try again</button></div>` : ''}
-    ${!t.running && !t.error ? `<div class="fv-note">"Interacted" counts their likes, replies, reposts, quotes and mentions of your accounts. Numbers with a + are higher than shown (very active accounts).</div>` : ''}`
+    ${!t.running && !t.error ? `<div class="fv-note">${group ? '"Followed by" is how many of the group follow them; "Follows them" how many of the group they follow back. ' : ''}"Interacted" counts their likes, replies, reposts, quotes and mentions of your accounts. Numbers with a + are higher than shown (very active accounts).</div>` : ''}`
 }
 
 function timeAgo(ms) {
@@ -1833,8 +1881,13 @@ async function renderRecentAnalyses() {
   try {
     recent = await api('/api/analyze/recent')
   } catch {}
-  $('#fvRecent').innerHTML = recent.filter((r) => r && r.did !== fv.target?.did).slice(0, 6).map((r) =>
-    `<button type="button" class="chip" data-recent="${esc(r.did)}" title="Read ${r.finishedAt ? timeAgo(r.finishedAt) : 'now'}">@${esc(r.handle)}${r.running ? ' (reading…)' : ''}</button>`).join('')
+  const current = targetKey(fv.target)
+  $('#fvRecent').innerHTML = recent.filter((r) => r && targetKey(r) !== current).slice(0, 6).map((r) => {
+    const label = r.kind === 'group'
+      ? `Group: ${r.members.slice(0, 2).map((m) => `@${esc(m.handle)}`).join(', ')}${r.members.length > 2 ? ` +${r.members.length - 2}` : ''}`
+      : `@${esc(r.handle)}`
+    return `<button type="button" class="chip" data-recent="${esc(targetKey(r))}" data-kind="${r.kind}" title="Read ${r.finishedAt ? timeAgo(r.finishedAt) : 'now'}">${label}${r.running ? ' (reading…)' : ''}</button>`
+  }).join('')
 }
 
 $('#fvAnalyzeForm').addEventListener('submit', (e) => {
@@ -1842,14 +1895,10 @@ $('#fvAnalyzeForm').addEventListener('submit', (e) => {
   const handle = $('#fvAnalyzeInput').value.trim()
   if (handle) startAnalysis(handle)
 })
-$('#fvRecent').addEventListener('click', async (e) => {
+$('#fvRecent').addEventListener('click', (e) => {
   const b = e.target.closest('[data-recent]')
   if (!b) return
-  fv.target = { did: b.dataset.recent }
-  fv.overlap = 'new'
-  fv.selected.clear()
-  safeSet('fvTarget', b.dataset.recent)
-  loadAnalysis()
+  openTarget(b.dataset.kind === 'group' ? { kind: 'group', id: b.dataset.recent } : { kind: 'single', did: b.dataset.recent })
 })
 $('#fvTargetBar').addEventListener('click', (e) => {
   const act = e.target.closest('[data-target]')?.dataset.target
@@ -1859,7 +1908,10 @@ $('#fvTargetBar').addEventListener('click', (e) => {
     setFollowsMode('mine')
     loadFollows()
   }
-  if (act === 'refresh') startAnalysis(fv.target.handle, true)
+  if (act === 'refresh') {
+    if (fv.target.kind === 'group') startGroup(fv.target.members.map((m) => m.did), true)
+    else startAnalysis(fv.target.handle, true)
+  }
 })
 
 $('#fvListSel').addEventListener('change', (e) => {
@@ -1948,6 +2000,12 @@ $('#fvBulk').addEventListener('click', (e) => {
   if (act === 'all') {
     for (const r of fv.visible) fv.selected.add(r.did)
     return renderFollows()
+  }
+  if (act === 'analyze') {
+    const dids = [...fv.selected]
+    if (dids.length > 10) return toast('Analyze at most 10 accounts at a time')
+    if (dids.length === 1) return startAnalysis(fv.rows.find((r) => r.did === dids[0])?.handle ?? dids[0])
+    return startGroup(dids)
   }
   openAction(act, [...fv.selected])
 })

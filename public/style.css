@@ -807,3 +807,8 @@ a.pc-btn:hover { text-decoration: none; border-color: var(--accent); }
   .sort-hint { display: none; }
 }
 .lt-row .ad-new-name { flex: 1; min-width: 0; font: inherit; padding: 3px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+.fv-target-avatars { display: flex; }
+.fv-target-avatars img { width: 34px; height: 34px; border-radius: 50%; border: 2px solid var(--surface); margin-left: -10px; background: var(--surface-2); object-fit: cover; cursor: pointer; }
+.fv-target-avatars img:first-child { margin-left: 0; }
+#fvAtLeastN { width: 44px; font: inherit; padding: 0 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
+.fv-bulk .primary { margin-left: auto; }

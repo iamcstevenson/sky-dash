@@ -113,6 +113,7 @@
           <option value="lists">Lists</option>
           <option value="interactions">Interacted</option>
           <option value="followersCount">Followers</option>
+          <option value="groupCount">Followed by (group)</option>
         </select>
       </div>
       <div class="fv-sortbar" id="fvSortBar"></div>
@@ -123,11 +124,13 @@
         <label class="chip"><input type="checkbox" data-q="never"> Never interacted with you</label>
         <label class="chip"><input type="checkbox" data-q="reposty"> Mostly reposts</label>
         <label class="chip" data-mine-only><input type="checkbox" data-q="muted"> Muted</label>
+        <label class="chip" data-group-only hidden><input type="checkbox" data-q="atleast"> Followed by at least <input type="number" id="fvAtLeastN" value="2" min="1" max="10"> of the group</label>
         <label class="chip" data-mine-only title="Bluesky no longer shows their profile"><input type="checkbox" data-q="gone"> Deleted or deactivated</label>
       </div>
       <div class="fv-bulk" id="fvBulk" hidden>
         <b id="fvCount"></b>
         <button class="link-btn" data-bulk="all" id="fvSelectAll" hidden></button>
+        <button class="primary" data-bulk="analyze" title="See who the selected accounts follow (up to 10)">Analyze selected</button>
         <button class="danger-btn" data-bulk="unfollow" data-mine-only>Unfollow…</button>
         <button class="secondary" data-bulk="list">Add to list…</button>
         <button class="secondary" data-bulk="unlist">Remove from list…</button>
@@ -141,6 +144,7 @@
             <th><input type="checkbox" id="fvAll" aria-label="Select all shown"></th>
             <th data-sort="name">Account</th>
             <th data-sort="followedBy" title="Which of your accounts follow them">By</th>
+            <th data-sort="groupCount" class="num" data-group-only hidden title="How many of the group follow them">Followed by</th>
             <th data-sort="posts" class="num" title="Posts in the last 14 days">Posts</th>
             <th data-sort="replies" class="num" title="Replies in the last 14 days">Replies</th>
             <th data-sort="reposts" class="num" title="Reposts in the last 14 days">Reposts</th>
