@@ -117,6 +117,8 @@ addColumn('profiles', 'follows_count', 'INTEGER')
 addColumn('profiles', 'joined_at', 'TEXT')
 // Newest post or repost seen for this account, even if older than the 14-day window
 addColumn('profiles', 'last_active_ms', 'INTEGER')
+// Set when Bluesky no longer returns the profile (deleted, deactivated or suspended); cleared when it comes back
+addColumn('profiles', 'gone_at', 'INTEGER')
 // 1 when the post is English (by its language label, or by its text when unlabeled)
 addColumn('posts', 'is_en', 'INTEGER')
 db.exec('CREATE INDEX IF NOT EXISTS posts_en_sort ON posts(is_en, sort_at DESC)')

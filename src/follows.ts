@@ -2,7 +2,7 @@
 // that change your follow graph: unfollow, follow, mute. Lists are in lists.ts.
 import { config } from './config.ts'
 import { db } from './db.ts'
-import { accounts, type Account } from './accounts.ts'
+import { accounts, loadProfileSoon, type Account } from './accounts.ts'
 import { refreshWanted } from './jetstream.ts'
 import { backfillNewFollow } from './backfill.ts'
 
@@ -18,7 +18,7 @@ export function followStats() {
   const follows = db
     .prepare(
       `SELECT f.account_did, f.subject_did, f.follows_back, f.muted,
-        p.handle, p.display_name, p.avatar, p.posts_count, p.followers_count, p.follows_count, p.joined_at, p.last_active_ms
+        p.handle, p.display_name, p.avatar, p.posts_count, p.followers_count, p.follows_count, p.joined_at, p.last_active_ms, p.gone_at
        FROM follows f LEFT JOIN profiles p ON p.did = f.subject_did`,
     )
     .all() as Row[]
@@ -37,6 +37,7 @@ export function followStats() {
         followsCount: f.follows_count,
         joinedAt: f.joined_at,
         lastActiveMs: f.last_active_ms ?? 0,
+        gone: !!f.gone_at,
         followedBy: [],
         followsBack: [],
         muted: [],
@@ -161,6 +162,7 @@ export async function follow(body: any) {
     const res = await a.agent.follow(did)
     db.prepare('INSERT OR REPLACE INTO follows (account_did, subject_did, follow_uri) VALUES (?, ?, ?)').run(a.did!, did, res.uri)
     if (!known) backfillNewFollow(did)
+    loadProfileSoon(did)
     return true
   })
   refreshWanted()
