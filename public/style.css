@@ -806,3 +806,4 @@ a.pc-btn:hover { text-decoration: none; border-color: var(--accent); }
 @media (max-width: 600px) {
   .sort-hint { display: none; }
 }
+.lt-row .ad-new-name { flex: 1; min-width: 0; font: inherit; padding: 3px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
