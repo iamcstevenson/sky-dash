@@ -1732,7 +1732,7 @@ function renderLsAccount() {
   if (ls.slot == null || !state.accounts.some((a) => a.slot === ls.slot)) ls.slot = state.actAs
   $('#lsAccount').hidden = state.accounts.length < 2
   $('#lsAccount').innerHTML = state.accounts.map((a) =>
-    `<button type="button" data-slot="${a.slot}" class="${a.slot === ls.slot ? 'on' : ''}">${badge(a.slot)} @${esc(a.handle)}</button>`).join('')
+    `<button type="button" data-slot="${a.slot}" class="${a.slot === ls.slot ? 'on' : ''}">${badge(a.slot)}<span class="h">@${esc(a.handle)}</span></button>`).join('')
 }
 
 async function loadLists() {
@@ -1754,7 +1754,7 @@ function renderLists() {
     ? ls.lists.map((l) => `<button type="button" class="card ls-item" data-open-list="${esc(l.uri)}">
         <span class="ls-text"><b>${esc(l.name)}</b>${l.description ? `<small>${esc(l.description)}</small>` : ''}</span>
         <span class="ls-count">${l.count} ${l.count === 1 ? 'person' : 'people'}</span></button>`).join('')
-    : `<p class="dim">@${esc(acctName(ls.slot))} has no lists yet. <b>New list</b> starts one; you can also add people from the Follows tab or a profile card.</p>`
+    : `<p class="dim">${esc(acctName(ls.slot))} has no lists yet. <b>New list</b> starts one; you can also add people from the Follows tab or a profile card.</p>`
 }
 
 function showLsDetail(open) {
@@ -1802,7 +1802,7 @@ function renderLsInfo() {
   const l = ls.current
   const others = state.accounts.filter((a) => a.slot !== l.ownerSlot)
   const copyBtns = others.map((a) => `<button type="button" class="pc-btn" data-ls="copy" data-slot="${a.slot}">Copy to ${badge(a.slot)} @${esc(a.handle)}</button>`).join('')
-  const byline = lsOwned() ? `Your list on ${badge(l.ownerSlot)} @${esc(acctName(l.ownerSlot))}` : `By @${esc(l.creator.handle)}`
+  const byline = lsOwned() ? `Your list on ${badge(l.ownerSlot)} ${esc(acctName(l.ownerSlot))}` : `By @${esc(l.creator.handle)}`
   $('#lsInfo').innerHTML = `<h2>${esc(l.name)}</h2>
     <div class="dim">${byline} · ${l.count ?? ls.members.length} ${(l.count ?? ls.members.length) === 1 ? 'person' : 'people'}</div>
     ${l.description ? `<p>${esc(l.description)}</p>` : ''}
@@ -1887,7 +1887,7 @@ function editListDialog() {
 }
 
 function newListDialog() {
-  $('#adTitle').textContent = `New list for @${acctName(ls.slot)}`
+  $('#adTitle').textContent = `New list for ${acctName(ls.slot)}`
   $('#adBody').innerHTML = `
     <label class="ad-field">Name <input id="lsNewName" maxlength="64" placeholder="e.g. Cardinals writers"></label>
     <label class="ad-field">Description (optional) <textarea id="lsNewDesc" rows="3" maxlength="300"></textarea></label>
@@ -2012,11 +2012,11 @@ $('#lsInfo').addEventListener('click', async (e) => {
   }
   if (b.dataset.ls === 'copy') {
     const to = Number(b.dataset.slot)
-    if (!confirm(`Make a copy of “${l.name}” on @${acctName(to)}?`)) return
+    if (!confirm(`Make a copy of “${l.name}” on ${acctName(to)}?`)) return
     b.disabled = true
     try {
       const copy = await api('/api/lists/copy', { listUri: l.uri, fromSlot: ls.slot, toSlot: to })
-      toast(`Copied “${copy.name}” with ${copy.count} ${copy.count === 1 ? 'person' : 'people'} to @${acctName(to)}`)
+      toast(`Copied “${copy.name}” with ${copy.count} ${copy.count === 1 ? 'person' : 'people'} to ${acctName(to)}`)
     } catch (err) {
       toast(err.message)
     } finally {
