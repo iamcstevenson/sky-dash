@@ -812,3 +812,6 @@ a.pc-btn:hover { text-decoration: none; border-color: var(--accent); }
 .fv-target-avatars img:first-child { margin-left: 0; }
 #fvAtLeastN { width: 44px; font: inherit; padding: 0 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
 .fv-bulk .primary { margin-left: auto; }
+/* Keep every column, including the group's "Followed by", on screen without sideways scrolling on a laptop */
+.fv-table th, .fv-table td { padding: 7px 6px; }
+.who-cell { max-width: 220px; min-width: 160px; }
