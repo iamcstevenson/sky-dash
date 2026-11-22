@@ -17,6 +17,7 @@ import { startDiscoverRefresh } from './discover.ts'
 import { uploadVideo } from './video.ts'
 import { receiveMedia, mediaFile } from './drafts.ts'
 import { startProfileDetails } from './profileDetails.ts'
+import { pruneAnalyses } from './analyze.ts'
 
 const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url))
 const TYPES: Record<string, string> = {
@@ -190,7 +191,10 @@ async function main() {
     refreshWanted()
     await refreshProfileCounts().catch(() => {})
   }, 6 * 3_600_000)
-  setInterval(() => prune(config.retentionDays), 3_600_000)
+  setInterval(() => {
+    prune(config.retentionDays)
+    pruneAnalyses()
+  }, 3_600_000)
   prune(config.retentionDays)
 
   server.listen(config.port, config.host, () => {
