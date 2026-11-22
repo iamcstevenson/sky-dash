@@ -275,3 +275,61 @@ export async function searchActors(slot: unknown, q: string) {
   const res = await reader(slot).agent.app.bsky.actor.searchActorsTypeahead({ q, limit: 10 })
   return res.data.actors.map(profile)
 }
+
+// ---------- memberships, for the Follows tab ----------
+
+async function allRecords(a: Account, collection: string) {
+  const out: { uri: string; value: any }[] = []
+  let cursor: string | undefined
+  do {
+    const res = await a.agent.com.atproto.repo.listRecords({ repo: a.did!, collection, limit: 100, cursor })
+    for (const r of res.data.records) out.push({ uri: r.uri, value: r.value })
+    cursor = res.data.records.length ? res.data.cursor : undefined
+  } while (cursor)
+  return out
+}
+
+// Every curated list of every signed-in account, and who is on each, read from the accounts' own records
+// (one pass per account) so it's current straight after a change.
+export async function memberships() {
+  const lists: { uri: string; name: string; slot: number; count: number }[] = []
+  const byDid: Record<string, string[]> = {}
+  const errors: { slot: number; error: string }[] = []
+  for (const a of accounts.filter((x) => x.ok && x.did)) {
+    try {
+      const own = (await allRecords(a, LIST)).filter((r) => r.value?.purpose === CURATE)
+      const counts = new Map(own.map((r) => [r.uri, new Set<string>()]))
+      for (const r of await allRecords(a, ITEM)) {
+        const set = counts.get(r.value?.list)
+        if (!set || typeof r.value?.subject !== 'string') continue
+        set.add(r.value.subject)
+      }
+      for (const r of own) {
+        const members = counts.get(r.uri)!
+        lists.push({ uri: r.uri, name: String(r.value.name ?? ''), slot: a.slot, count: members.size })
+        for (const did of members) (byDid[did] ??= []).push(r.uri)
+      }
+    } catch (err: any) {
+      errors.push({ slot: a.slot, error: err?.message ?? String(err) })
+    }
+  }
+  lists.sort((x, y) => x.slot - y.slot || x.name.localeCompare(y.name))
+  return { lists, byDid, errors }
+}
+
+// Takes several people off one of your lists (every record for each, in case of doubles)
+export async function removeManyFromList(body: any) {
+  const a = signedIn(body.slot)
+  const { uri } = ownList(a, body.listUri)
+  if (!Array.isArray(body.dids) || !body.dids.length) throw new ListError(400, 'No accounts selected')
+  if (body.dids.length > MAX_BATCH) throw new ListError(400, `At most ${MAX_BATCH} at a time`)
+  const dids = new Set(body.dids.map(String))
+  const keys = (await repoItems(a, uri)).filter((i) => dids.has(i.subject)).map((i) => i.rkey)
+  await chunked(keys, (chunk) =>
+    a.agent.com.atproto.repo.applyWrites({
+      repo: a.did!,
+      writes: chunk.map((k) => ({ $type: 'com.atproto.repo.applyWrites#delete', collection: ITEM, rkey: k })),
+    }),
+  )
+  return { done: keys.length, failed: [] }
+}

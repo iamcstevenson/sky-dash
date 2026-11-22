@@ -7,7 +7,7 @@ import { backfill } from './backfill.ts'
 import { hydrate, forget, primaryAccount } from './hydrate.ts'
 import { listKeywords, addKeyword, removeKeyword, renameKeyword, normalizeQuery, pollKeywords, keywordStatus } from './keywords.ts'
 import { followStats, unfollow, follow, mute, profileCard } from './follows.ts'
-import { myLists, listMembers, listFeedRows, resolveListLink, createList, updateList, deleteList, addToList, removeFromList, copyList, searchActors } from './lists.ts'
+import { myLists, listMembers, listFeedRows, resolveListLink, createList, updateList, deleteList, addToList, removeFromList, copyList, searchActors, memberships, removeManyFromList } from './lists.ts'
 import { notifStatus } from './notifications.ts'
 import { trending, postsForTopic } from './trending.ts'
 import { isEnglish } from './lang.ts'
@@ -300,6 +300,8 @@ const routes: Record<string, Handler> = {
   'POST /api/lists/delete': async (_q, b) => deleteList(b),
   'POST /api/lists/add': async (_q, b) => addToList(b),
   'POST /api/lists/remove': async (_q, b) => removeFromList(b),
+  'GET /api/lists/memberships': async () => memberships(),
+  'POST /api/lists/remove-many': async (_q, b) => removeManyFromList(b),
   'POST /api/lists/copy': async (_q, b) => copyList(b),
 
   // ---------- trending ----------

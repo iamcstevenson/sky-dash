@@ -94,6 +94,7 @@
       <div class="fv-controls">
         <div class="seg" id="fvOverlap"></div>
         <input id="fvSearch" type="search" placeholder="Search name or handle" autocomplete="off">
+        <select id="fvListSel" class="fv-list-sel" aria-label="Filter by list"><option value="">Any list</option></select>
         <button type="button" class="secondary fv-quick-toggle" id="fvQuickToggle" aria-expanded="false" aria-controls="fvQuick">Filters</button>
         <select id="fvSortSel" class="fv-sort-sel" aria-label="Sort by">
           <option value="name">Sort: name</option>
@@ -102,6 +103,7 @@
           <option value="reposts">Sort: reposts</option>
           <option value="repostShare">Sort: repost %</option>
           <option value="lastActiveMs">Sort: last active</option>
+          <option value="lists">Sort: lists</option>
           <option value="interactions">Sort: interacted</option>
           <option value="followersCount">Sort: followers</option>
         </select>
@@ -117,7 +119,8 @@
       <div class="fv-bulk" id="fvBulk" hidden>
         <b id="fvCount"></b>
         <button class="danger-btn" data-bulk="unfollow">Unfollow…</button>
-        <button class="secondary" data-bulk="list">Move to list…</button>
+        <button class="secondary" data-bulk="list">Add to list…</button>
+        <button class="secondary" data-bulk="unlist">Remove from list…</button>
         <button class="secondary" data-bulk="mute">Mute…</button>
         <button class="secondary" data-bulk="follow">Follow from…</button>
         <button class="link-btn" data-bulk="clear">Clear</button>
@@ -134,6 +137,7 @@
             <th data-sort="repostShare" class="num" title="Share of their activity that is reposts">Repost %</th>
             <th data-sort="lastActiveMs" class="num" title="Days since their last post or repost">Last active</th>
             <th data-sort="followsBack" title="Which of your accounts they follow">Follows you</th>
+            <th data-sort="lists" title="Which of your lists they're on">Lists</th>
             <th data-sort="interactions" class="num" title="Likes, replies, reposts, quotes and mentions of your accounts">Interacted</th>
             <th data-sort="followersCount" class="num">Followers</th>
             <th></th>
