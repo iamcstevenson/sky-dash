@@ -63,7 +63,7 @@ Everything lives in `data/skydash.db` (ignored by git). Main tables:
 Skydash moves from the Mac to one small DigitalOcean server ("droplet"). The code doesn't change: the same process runs under systemd instead of launchd. See decisions #15–#18, the requirements' Cloud hosting section, and issues #14–#19 for the steps.
 
 ```
-                    DigitalOcean droplet (Ubuntu 24.04, 1 GB, SFO2)  
+                    DigitalOcean droplet (Ubuntu 24.04, 1 GB, NYC3)  
                     ┌───────────────────────────────────────────────┐
 Bluesky services ◄──┤ skydash.service (Node LTS, user "skydash")    │
                     │   dashboard 127.0.0.1:4747                    │
@@ -80,7 +80,7 @@ Bluesky services ◄──┤ skydash.service (Node LTS, user "skydash")    │
 
 | Piece | Choice |
 | --- | --- |
-| Server | Droplet `skydash`: DigitalOcean Basic, 1 vCPU / 1 GB / 25 GB disk plus 1 GB swap, Ubuntu 24.04, San Francisco (SFO2; SFO3 had no 1 GB size). Built November 2026 (#14). Skydash uses about 100 MB of memory and a 550 MB database. Since November 2026 it also runs Tubedash (about 115 MB, served on the tailnet at `:8443`; see Tubedash's architecture doc), leaving about 400 MB free. Resize to 2 GB when the next project moves onto it. |
+| Server | Droplet `skydash-nyc` (Tailscale name `skydash`): DigitalOcean Basic, 1 vCPU / 1 GB / 25 GB disk plus 1 GB swap, Ubuntu 24.04, New York (NYC3). Built November 2026 (#27), replacing the first server in San Francisco (SFO2, #14), because Bluesky's services are in the eastern US. Skydash uses about 100 MB of memory and a 550 MB database. Since November 2026 it also runs Tubedash (about 115 MB, served on the tailnet at `:8443`; see Tubedash's architecture doc), leaving about 400 MB free. Resize to 2 GB when the next project moves onto it. |
 | Runtime | Node LTS (24 or newer) from the official Node.js packages. |
 | Process | `deploy/skydash.service` (installed by `deploy/setup.sh`, which rebuilds a server from scratch) runs `node --env-file-if-exists=.env src/server.ts` as user `skydash` from `/opt/skydash`, with `Restart=always`, matching the launchd agent. |
 | Data | `DB_PATH=/var/lib/skydash/skydash.db`. Drafts sit beside it in `drafts/`, as they do now. |
@@ -89,9 +89,11 @@ Bluesky services ◄──┤ skydash.service (Node LTS, user "skydash")    │
 | Public access | None, apart from `tailscale funnel` for the custom feed. The DigitalOcean Cloud Firewall `skydash-fw` has no inbound rules, so it drops all public traffic, and `ufw` on the droplet allows only the `tailscale0` interface and Tailscale's UDP port. Tailscale connects outbound, so it needs no open ports. |
 | Backups | DigitalOcean weekly backups of the whole droplet. Every night at about 10:30 UTC, `skydash-backup.timer` runs `deploy/backup.sh`. It copies the database with `sqlite3 .backup`, checks the copy, packs it with `drafts/`, and uploads it with `rclone` through the encrypted remote `skydash-crypt` (file contents and names) to the private R2 bucket `skydash-backups`, keeping 14 days. The database holds sign-in sessions, so it is never uploaded unencrypted. The `r2` remote uses an R2 token limited to that bucket. The encryption password and salt are in `/root/skydash-secrets/` and in Christian's password manager; without them the backups can't be read. `deploy/restore.sh` downloads the newest backup (or a named one) into a root-only folder and checks it, without touching the live database. Its header lists the steps to put a restore live. Tested November 2026 (#16). |
 | Updates | Ubuntu unattended security upgrades. Deploy with `ssh skydash /opt/skydash/deploy/deploy.sh`: it pulls `main`, runs `npm ci`, updates the units if they changed, restarts and shows the log if the start fails. GitHub Actions can run it later (#19). |
-| Monitoring | DigitalOcean's free monitoring with email alerts for disk over 80% and memory over 90% for 10 minutes; systemd restarts the process if it stops. |
+| Monitoring | DigitalOcean's free monitoring with email alerts for disk over 80% and memory over 90% for 10 minutes; systemd restarts the process if it stops. The alerts name the droplet by ID, so a rebuilt server needs them pointed at it (`doctl monitoring alert update`). |
 
 **Moving the data (done November 19, 2026, #17):** the Mac's LaunchAgent was stopped (`launchctl bootout`), the database copied with `sqlite3 .backup` (which folds in the WAL) and packed with `drafts/`, then unpacked into `/var/lib/skydash` and given to user `skydash`. The live stream resumed from the Mac's saved cursor, so nothing was missed. The server's own pre-cutover database is in `/root/pre-cutover` and in the R2 backups. To roll back, stop the service and start the Mac's LaunchAgent again; its data on Lacie is as it was at the cutover.
+
+**Move to New York (November 22, 2026, #27):** the new droplet was built with `deploy/setup.sh` and Tubedash's own setup script, with no DigitalOcean tag until it was on the tailnet (the tag applies `skydash-fw`, which blocks public SSH). Settings (`.env`), Tubedash's deploy key, the rclone config and the backup secrets were copied server to server. Both services were stopped and disabled on the old server, the databases copied with `sqlite3 .backup` and checked, then the old machine renamed `skydash-sfo` on the tailnet and the new one given the name `skydash`, so every address (dashboards, Hub Agent, `ssh skydash`) stayed the same. Round trip from the Mac went from about 100 ms to about 55 ms. The old server keeps its copy in `/root/cutover-nyc` until it is deleted; to roll back, swap the Tailscale names back and start its services.
 
 **Custom feed:** off, by choice (November 2026). It was never published from the Mac either, so no address needs to be kept. Turning it on later means setting `FEEDGEN_HOSTNAME=skydash.tail4cef1e.ts.net`, running `tailscale funnel --bg 4748` (the server's only public route) and publishing the feed from the dashboard. Its address is `did:web:<FEEDGEN_HOSTNAME>`.
 
