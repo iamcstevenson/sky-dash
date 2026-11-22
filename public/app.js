@@ -1344,6 +1344,16 @@ const fv = {
   // Your curated lists (both accounts) and who is on each: { lists: [{ uri, name, slot, count }], byDid: { did: [uri] } }
   lists: { lists: [], byDid: {} },
   listFilter: '', // '' any, 'none' not on any list, or a list's uri
+  // 'mine' = your follows; 'ext' = the follows of another account (fv.target), from /api/analyze
+  mode: 'mine',
+  target: null,
+  pollTimer: null,
+}
+const isExt = () => fv.mode === 'ext'
+// Reopen the last analysis after a reload (if it's gone, the Follows tab falls back to your own follows)
+if (safeGet('fvTarget')) {
+  fv.mode = 'ext'
+  fv.target = { did: safeGet('fvTarget') }
 }
 
 const listsOf = (did) => fv.lists.byDid[did] ?? []
@@ -1382,6 +1392,9 @@ function daysAgo(ms) {
 }
 
 async function loadFollows() {
+  renderRecentAnalyses()
+  if (isExt()) return loadAnalysis()
+  setFollowsMode('mine')
   try {
     const [data] = await Promise.all([api('/api/follows'), refreshMemberships()])
     fv.rows = data.rows
@@ -1412,7 +1425,12 @@ function renderFollowsNote(data) {
 function renderOverlap() {
   const n = (f) => fv.rows.filter(f).length
   const opts = [['all', `All ${fv.rows.length}`]]
-  if (state.accounts.length === 2) {
+  if (isExt()) {
+    if (!['all', 'new', 'mine'].includes(fv.overlap)) fv.overlap = 'all'
+    opts.push(['new', `New to me ${n(isNewToMe)}`])
+    opts.push(['mine', `You follow ${n((r) => r.followedBy.length > 0)}`])
+  } else if (state.accounts.length === 2) {
+    if (['new', 'mine'].includes(fv.overlap)) fv.overlap = 'all'
     const [a, b] = state.accounts.map((x) => x.slot)
     opts.push(['both', `Both ${n((r) => r.followedBy.length === 2)}`])
     opts.push([`only${a}`, `${LETTERS[a]} only ${n((r) => r.followedBy.length === 1 && r.followedBy[0] === a)}`])
@@ -1425,13 +1443,15 @@ function filteredFollows() {
   const q = fv.search.toLowerCase()
   const quietMs = Date.now() - fv.days * DAY
   return fv.rows.filter((r) => {
+    if (fv.overlap === 'new' && !isNewToMe(r)) return false
+    if (fv.overlap === 'mine' && !r.followedBy.length) return false
     if (fv.overlap === 'both' && r.followedBy.length !== 2) return false
     if (fv.overlap.startsWith('only') && !(r.followedBy.length === 1 && r.followedBy[0] === Number(fv.overlap.slice(4)))) return false
     if (q && !`${r.handle ?? ''} ${r.displayName ?? ''}`.toLowerCase().includes(q)) return false
     if (fv.quick.has('quiet') && r.lastActiveMs > quietMs) return false
     if (fv.quick.has('low') && r.posts + r.replies > fv.lowN) return false
     // "Doesn't follow back" means not back to any account of yours that follows them
-    if (fv.quick.has('noback') && r.followedBy.some((s) => r.followsBack.includes(s))) return false
+    if (!isExt() && fv.quick.has('noback') && r.followedBy.some((s) => r.followsBack.includes(s))) return false
     if (fv.quick.has('never') && r.interactions > 0) return false
     if (fv.quick.has('reposty') && !(r.repostShare >= 0.8 && r.posts + r.replies + r.reposts >= 5)) return false
     if (fv.quick.has('muted') && !r.muted.length) return false
@@ -1446,7 +1466,7 @@ function sortValue(r, key) {
   switch (key) {
     case 'name': return (r.displayName || r.handle || '').toLowerCase()
     case 'followedBy': return r.followedBy.join('')
-    case 'followsBack': return r.followsBack.length
+    case 'followsBack': return isExt() ? (r.followsTarget ? 1 : 0) : r.followsBack.length
     case 'lists': return listsOf(r.did).length
     case 'repostShare': return r.repostShare ?? -1
     default: return r[key] ?? -1
@@ -1474,7 +1494,11 @@ function renderFollows() {
     const d = daysAgo(r.lastActiveMs)
     const last = d === null ? `<span class="dim" title="No posts seen">—</span>` : d === 0 ? 'today' : `${d}d`
     const share = r.repostShare === null ? '<span class="dim">—</span>' : `${Math.round(r.repostShare * 100)}%`
-    const back = r.followedBy.map((s) => r.followsBack.includes(s) ? badge(s, `Follows ${acctName(s)}`) : `<span class="dim" title="Doesn't follow ${esc(acctName(s))}">${LETTERS[s]}✕</span>`).join(' ')
+    const back = isExt()
+      ? (r.followsTarget ? `<span title="Follows @${esc(fv.target?.handle ?? '')}">✓</span>` : `<span class="dim" title="Doesn't follow @${esc(fv.target?.handle ?? '')}">✕</span>`)
+      : r.followedBy.map((s) => r.followsBack.includes(s) ? badge(s, `Follows ${acctName(s)}`) : `<span class="dim" title="Doesn't follow ${esc(acctName(s))}">${LETTERS[s]}✕</span>`).join(' ')
+    // In another account's view, numbers not read yet show a dash, and capped ones a "+"
+    const num = (v) => isExt() && !r.read ? '<span class="dim">…</span>' : `${v}${r.capped ? '+' : ''}`
     const inter = r.interactions
       ? `<span title="${Object.entries(r.interactionsBySlot).map(([s, n]) => `${n} with ${acctName(s)}`).join(', ')}; last ${new Date(r.lastInteractionMs).toLocaleDateString()}">${r.interactions.toLocaleString()}</span>`
       : '<span class="dim">0</span>'
@@ -1484,21 +1508,26 @@ function renderFollows() {
         <div>${r.gone
           ? `<b class="gone" title="Bluesky no longer shows this profile">Deleted or deactivated</b><small>${esc(r.handle ? '@' + r.handle : r.did)}</small>`
           : `<b data-profile="${esc(r.did)}">${esc(r.displayName || r.handle || r.did)}</b><small data-profile="${esc(r.did)}">${r.handle ? '@' + esc(r.handle) : 'Loading profile…'}${r.muted.length ? ' · muted' : ''}</small>`}</div></div></td>
-      <td data-label="By">${r.followedBy.map((s) => badge(s)).join(' ')}</td>
-      <td class="num" data-label="Posts">${r.posts}</td>
-      <td class="num" data-label="Replies">${r.replies}</td>
-      <td class="num" data-label="Reposts">${r.reposts}</td>
+      <td data-label="${isExt() ? 'You' : 'By'}">${r.followedBy.map((s) => badge(s)).join(' ') || (isExt() ? '<span class="dim">—</span>' : '')}</td>
+      <td class="num" data-label="Posts">${num(r.posts)}</td>
+      <td class="num" data-label="Replies">${num(r.replies)}</td>
+      <td class="num" data-label="Reposts">${num(r.reposts)}</td>
       <td class="num" data-label="Repost %">${share}</td>
       <td class="num ${r.lastActiveMs && r.lastActiveMs < quietMs ? 'dim' : ''}" data-label="Last active">${last}</td>
-      <td data-label="Follows you">${back}</td>
+      <td data-label="${isExt() ? 'Follows them' : 'Follows you'}">${back}</td>
       <td class="lists-td" data-label="Lists" data-row="lists" title="Change which lists they're on">${listChips(r.did)}</td>
       <td class="num" data-label="Interacted">${inter}</td>
       <td class="num" data-label="Followers">${r.followersCount?.toLocaleString() ?? '<span class="dim">—</span>'}</td>
-      <td class="acts-cell"><div class="row-acts">
+      <td class="acts-cell"><div class="row-acts">${isExt() ? `
+        ${r.followedBy.includes(state.actAs)
+          ? `<span class="dim row-following">Following</span>`
+          : `<button data-row="follow" class="good" title="Follow as ${esc(acctName(state.actAs))}">Follow</button>`}
+        <button data-row="lists" title="Add to or remove from your lists">+ List</button>
+        <a class="row-acts-link" href="https://bsky.app/profile/${esc(r.handle || r.did)}" target="_blank" rel="noopener" title="Open profile on bsky.app">↗</a>` : `
         <button data-row="posts" title="See their posts from the last ${fv.days} days">Posts</button>
         <button data-row="lists" title="Add to or remove from your lists">+ List</button>
         <a class="row-acts-link" href="https://bsky.app/profile/${esc(r.handle || r.did)}" target="_blank" rel="noopener" title="Open profile on bsky.app">↗</a>
-        <button data-row="unfollow" class="bad" title="Unfollow">Unfollow</button>
+        <button data-row="unfollow" class="bad" title="Unfollow">Unfollow</button>`}
       </div></td></tr>`
   }).join('')
 
@@ -1586,6 +1615,160 @@ $('#fvBody').addEventListener('click', (e) => {
   if (act === 'posts') showAuthor(did, row.handle)
   if (act === 'unfollow') openAction('unfollow', [did])
   if (act === 'lists') openListToggle(did)
+  if (act === 'follow') quickFollow(did, e.target.closest('button'))
+})
+
+// One click: follow as the acting account, and update the row in place
+async function quickFollow(did, btn) {
+  const row = fv.rows.find((r) => r.did === did)
+  const slot = state.actAs
+  btn.disabled = true
+  try {
+    const res = await api('/api/follows/follow', { dids: [did], slots: [slot] })
+    if (res.failed?.length) throw new Error(res.failed[0].error)
+    if (row && !row.followedBy.includes(slot)) row.followedBy = [...row.followedBy, slot].sort()
+    toast(`Followed @${row?.handle ?? did} as ${acctName(slot)}`)
+    renderOverlap()
+    renderFollows()
+  } catch (err) {
+    toast(err.message)
+    btn.disabled = false
+  }
+}
+
+// "New to me": neither of your accounts follows them, they're on none of your lists, and you haven't muted them
+function isNewToMe(r) {
+  return !r.followedBy.length && !listsOf(r.did).length && !r.muted.length
+}
+
+// ---------- another account's follows ----------
+
+function setFollowsMode(mode) {
+  fv.mode = mode
+  document.querySelectorAll('#followsView [data-mine-only]').forEach((el) => {
+    el.hidden = mode === 'ext'
+    const box = el.querySelector('input[data-q]')
+    if (box && mode === 'ext' && box.checked) {
+      box.checked = false
+      fv.quick.delete(box.dataset.q)
+    }
+  })
+  const th = (key) => document.querySelector(`.fv-table th[data-sort="${key}"]`)
+  th('followedBy').textContent = mode === 'ext' ? 'You' : 'By'
+  th('followedBy').title = mode === 'ext' ? 'Which of your accounts follow them' : 'Which of your accounts follow them'
+  th('followsBack').textContent = mode === 'ext' ? 'Follows them' : 'Follows you'
+  th('followsBack').title = mode === 'ext' ? `Whether they follow @${fv.target?.handle ?? ''} back` : 'Which of your accounts they follow'
+  th('interactions').title = mode === 'ext' ? 'Their likes, replies, reposts, quotes and mentions of your accounts' : 'Likes, replies, reposts, quotes and mentions of your accounts'
+  if (mode === 'mine') {
+    clearTimeout(fv.pollTimer)
+    fv.target = null
+    $('#fvTargetBar').hidden = true
+    safeSet('fvTarget', '')
+  }
+}
+
+async function startAnalysis(handle, refresh = false) {
+  try {
+    const s = await api('/api/analyze', { handle, refresh })
+    fv.target = s
+    fv.selected.clear()
+    fv.overlap = 'new'
+    fv.shown = 150
+    safeSet('fvTarget', s.did)
+    $('#fvAnalyzeInput').value = ''
+    await loadAnalysis()
+  } catch (err) {
+    toast(err.message)
+  }
+}
+
+let analysisSeq = 0
+async function loadAnalysis() {
+  const did = fv.target?.did
+  if (!did) return setFollowsMode('mine'), loadFollows()
+  const seq = ++analysisSeq
+  setFollowsMode('ext')
+  clearTimeout(fv.pollTimer)
+  try {
+    const [data] = await Promise.all([api(`/api/analyze/rows?did=${encodeURIComponent(did)}`), fv.lists.lists.length ? null : refreshMemberships()])
+    if (seq !== analysisSeq || !isExt()) return
+    fv.target = data.status
+    fv.rows = data.rows
+    fv.days = data.days
+    const known = new Set(fv.rows.map((r) => r.did))
+    for (const d of fv.selected) if (!known.has(d)) fv.selected.delete(d)
+    renderTargetBar()
+    renderOverlap()
+    renderFollows()
+    // While it's still reading, show progress every few seconds and fill in the rows as they come
+    if (data.status.running) fv.pollTimer = setTimeout(() => state.view === 'follows' && isExt() && loadAnalysis(), 4_000)
+    else renderRecentAnalyses()
+  } catch (err) {
+    toast(`Couldn't load the analysis: ${err.message}`)
+    setFollowsMode('mine')
+    loadFollows()
+  }
+}
+
+function renderTargetBar() {
+  const t = fv.target
+  const pct = t.total ? Math.round((t.done / t.total) * 100) : 0
+  const when = t.finishedAt ? `read ${timeAgo(t.finishedAt)}` : ''
+  $('#fvTargetBar').hidden = false
+  $('#fvTargetBar').innerHTML = `
+    <div class="fv-target-head">
+      <img src="${esc(t.avatar ?? '')}" alt="" data-profile="${esc(t.did)}">
+      <div class="fv-target-names"><b>Who ${esc(t.displayName || t.handle)} follows</b><small>@${esc(t.handle)} · ${t.total.toLocaleString()} accounts${when ? ` · ${when}` : ''}</small></div>
+      <div class="fv-target-acts">
+        ${t.running ? '' : '<button type="button" class="secondary" data-target="refresh">Refresh</button>'}
+        <button type="button" class="secondary" data-target="back">Back to my follows</button>
+      </div>
+    </div>
+    ${t.running ? `<div class="fv-progress" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><span style="width:${pct}%"></span></div>
+      <div class="fv-note">Reading each account's last ${fv.days} days: ${t.done.toLocaleString()} of ${t.total.toLocaleString()}. About ${Math.max(1, Math.ceil((t.total - t.done) / 400))} min left; you can use the rows already read.</div>` : ''}
+    ${t.error ? `<div class="error">${esc(t.error)}. <button type="button" class="link-btn" data-target="refresh">Try again</button></div>` : ''}
+    ${!t.running && !t.error ? `<div class="fv-note">"Interacted" counts their likes, replies, reposts, quotes and mentions of your accounts. Numbers with a + are higher than shown (very active accounts).</div>` : ''}`
+}
+
+function timeAgo(ms) {
+  const m = Math.round((Date.now() - ms) / 60_000)
+  if (m < 1) return 'just now'
+  if (m < 60) return `${m} min ago`
+  return `${Math.round(m / 60)} h ago`
+}
+
+async function renderRecentAnalyses() {
+  let recent = []
+  try {
+    recent = await api('/api/analyze/recent')
+  } catch {}
+  $('#fvRecent').innerHTML = recent.filter((r) => r && r.did !== fv.target?.did).slice(0, 6).map((r) =>
+    `<button type="button" class="chip" data-recent="${esc(r.did)}" title="Read ${r.finishedAt ? timeAgo(r.finishedAt) : 'now'}">@${esc(r.handle)}${r.running ? ' (reading…)' : ''}</button>`).join('')
+}
+
+$('#fvAnalyzeForm').addEventListener('submit', (e) => {
+  e.preventDefault()
+  const handle = $('#fvAnalyzeInput').value.trim()
+  if (handle) startAnalysis(handle)
+})
+$('#fvRecent').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-recent]')
+  if (!b) return
+  fv.target = { did: b.dataset.recent }
+  fv.overlap = 'new'
+  fv.selected.clear()
+  safeSet('fvTarget', b.dataset.recent)
+  loadAnalysis()
+})
+$('#fvTargetBar').addEventListener('click', (e) => {
+  const act = e.target.closest('[data-target]')?.dataset.target
+  if (act === 'back') {
+    fv.selected.clear()
+    fv.overlap = 'all'
+    setFollowsMode('mine')
+    loadFollows()
+  }
+  if (act === 'refresh') startAnalysis(fv.target.handle, true)
 })
 
 $('#fvListSel').addEventListener('change', (e) => {

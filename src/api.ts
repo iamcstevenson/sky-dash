@@ -7,6 +7,7 @@ import { backfill } from './backfill.ts'
 import { hydrate, forget, primaryAccount } from './hydrate.ts'
 import { listKeywords, addKeyword, removeKeyword, renameKeyword, normalizeQuery, pollKeywords, keywordStatus } from './keywords.ts'
 import { followStats, unfollow, follow, mute, profileCard } from './follows.ts'
+import { startAnalysis, analysisStatus, analysisRows, recentAnalyses } from './analyze.ts'
 import { myLists, listMembers, listFeedRows, resolveListLink, createList, updateList, deleteList, addToList, removeFromList, copyList, searchActors, memberships, removeManyFromList } from './lists.ts'
 import { notifStatus } from './notifications.ts'
 import { trending, postsForTopic } from './trending.ts'
@@ -279,6 +280,11 @@ const routes: Record<string, Handler> = {
     history: { running: backfill.running, deep: backfill.deep, done: backfill.done, total: backfill.total },
     notifications: notifStatus,
   }),
+  // Another account's follows (decision #23)
+  'POST /api/analyze': async (_q, b) => startAnalysis(b),
+  'GET /api/analyze/status': async (q) => analysisStatus(q.get('did')),
+  'GET /api/analyze/rows': async (q) => analysisRows(q.get('did')),
+  'GET /api/analyze/recent': async () => recentAnalyses(),
   'POST /api/follows/unfollow': async (_q, b) => unfollow(b),
   'POST /api/follows/follow': async (_q, b) => follow(b),
   'POST /api/follows/mute': async (_q, b) => mute(b, true),

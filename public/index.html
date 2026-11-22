@@ -90,6 +90,12 @@
     </section>
 
     <section id="followsView" class="follows-view" hidden>
+      <form id="fvAnalyzeForm" class="fv-analyze">
+        <input id="fvAnalyzeInput" type="text" placeholder="See who another account follows: @handle" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <button type="submit" class="secondary">Analyze</button>
+      </form>
+      <div id="fvRecent" class="fv-recent"></div>
+      <div id="fvTargetBar" class="card fv-target" hidden></div>
       <div id="fvNote" class="fv-note"></div>
       <div class="fv-controls">
         <div class="seg" id="fvOverlap"></div>
@@ -111,18 +117,18 @@
       <div class="fv-quick" id="fvQuick">
         <label class="chip"><input type="checkbox" data-q="quiet"> Quiet 14+ days</label>
         <label class="chip"><input type="checkbox" data-q="low"> At most <input type="number" id="fvLowN" value="3" min="0" max="999"> posts + replies in 14 days</label>
-        <label class="chip"><input type="checkbox" data-q="noback"> Doesn't follow back</label>
+        <label class="chip" data-mine-only><input type="checkbox" data-q="noback"> Doesn't follow back</label>
         <label class="chip"><input type="checkbox" data-q="never"> Never interacted with you</label>
         <label class="chip"><input type="checkbox" data-q="reposty"> Mostly reposts</label>
-        <label class="chip"><input type="checkbox" data-q="muted"> Muted</label>
-        <label class="chip" title="Bluesky no longer shows their profile"><input type="checkbox" data-q="gone"> Deleted or deactivated</label>
+        <label class="chip" data-mine-only><input type="checkbox" data-q="muted"> Muted</label>
+        <label class="chip" data-mine-only title="Bluesky no longer shows their profile"><input type="checkbox" data-q="gone"> Deleted or deactivated</label>
       </div>
       <div class="fv-bulk" id="fvBulk" hidden>
         <b id="fvCount"></b>
-        <button class="danger-btn" data-bulk="unfollow">Unfollow…</button>
+        <button class="danger-btn" data-bulk="unfollow" data-mine-only>Unfollow…</button>
         <button class="secondary" data-bulk="list">Add to list…</button>
         <button class="secondary" data-bulk="unlist">Remove from list…</button>
-        <button class="secondary" data-bulk="mute">Mute…</button>
+        <button class="secondary" data-bulk="mute" data-mine-only>Mute…</button>
         <button class="secondary" data-bulk="follow">Follow from…</button>
         <button class="link-btn" data-bulk="clear">Clear</button>
       </div>
