@@ -310,7 +310,7 @@ mark { background: color-mix(in srgb, #ffd54a 55%, transparent); color: inherit;
 .toast button { border: 0; background: none; color: var(--accent); font-weight: 700; margin-left: 10px; padding: 0; }
 .row-acts-link { padding: 2px 6px; border-radius: 6px; font-size: 13px; }
 .row-acts-link:hover { background: var(--surface-2); text-decoration: none; }
-body.wide main, body.wide .tabs { max-width: 1240px; }
+body.wide main, body.wide .tabs { max-width: 1320px; }
 
 /* ---------- Trending tab ---------- */
 .trend-controls { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
