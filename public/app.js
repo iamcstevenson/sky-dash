@@ -404,6 +404,31 @@ document.querySelectorAll('.seg').forEach((seg) => {
   })
 })
 
+// ---------- phone layout ----------
+
+// On a phone the post filters fold behind one button
+$('#filtersToggle').addEventListener('click', (e) => {
+  const open = $('#filters').classList.toggle('open')
+  e.target.setAttribute('aria-expanded', String(open))
+})
+
+// On a phone the header slides away while scrolling down and comes back when scrolling up
+{
+  let lastY = window.scrollY
+  let queued = false
+  window.addEventListener('scroll', () => {
+    if (queued) return
+    queued = true
+    requestAnimationFrame(() => {
+      queued = false
+      const y = window.scrollY
+      if (Math.abs(y - lastY) < 8) return
+      document.body.classList.toggle('scrolled-down', y > lastY && y > 80)
+      lastY = y
+    })
+  }, { passive: true })
+}
+
 // ---------- tabs ----------
 
 function showView(name) {
@@ -1387,6 +1412,8 @@ function sortValue(r, key) {
 function renderFollows() {
   const rows = filteredFollows()
   const { key, dir } = fv.sort
+  if ($('#fvSortSel').value !== key) $('#fvSortSel').value = key
+  updateFvQuickToggle()
   rows.sort((a, b) => {
     const x = sortValue(a, key)
     const y = sortValue(b, key)
@@ -1408,19 +1435,19 @@ function renderFollows() {
       ? `<span title="${Object.entries(r.interactionsBySlot).map(([s, n]) => `${n} with ${acctName(s)}`).join(', ')}; last ${new Date(r.lastInteractionMs).toLocaleDateString()}">${r.interactions.toLocaleString()}</span>`
       : '<span class="dim">0</span>'
     return `<tr data-did="${esc(r.did)}" class="${fv.selected.has(r.did) ? 'sel' : ''}">
-      <td><input type="checkbox" data-pick ${fv.selected.has(r.did) ? 'checked' : ''} aria-label="Select ${esc(r.handle)}"></td>
-      <td><div class="who-cell"><img loading="lazy" data-profile="${esc(r.did)}" src="${esc(r.avatar ?? '')}" alt="">
+      <td class="pick-td"><input type="checkbox" data-pick ${fv.selected.has(r.did) ? 'checked' : ''} aria-label="Select ${esc(r.handle)}"></td>
+      <td class="who-td"><div class="who-cell"><img loading="lazy" data-profile="${esc(r.did)}" src="${esc(r.avatar ?? '')}" alt="">
         <div><b data-profile="${esc(r.did)}">${esc(r.displayName || r.handle || r.did)}</b><small data-profile="${esc(r.did)}">@${esc(r.handle ?? '')}${r.muted.length ? ' · muted' : ''}</small></div></div></td>
-      <td>${r.followedBy.map((s) => badge(s)).join(' ')}</td>
-      <td class="num">${r.posts}</td>
-      <td class="num">${r.replies}</td>
-      <td class="num">${r.reposts}</td>
-      <td class="num">${share}</td>
-      <td class="num ${r.lastActiveMs && r.lastActiveMs < quietMs ? 'dim' : ''}">${last}</td>
-      <td>${back}</td>
-      <td class="num">${inter}</td>
-      <td class="num">${r.followersCount?.toLocaleString() ?? '<span class="dim">—</span>'}</td>
-      <td><div class="row-acts">
+      <td data-label="By">${r.followedBy.map((s) => badge(s)).join(' ')}</td>
+      <td class="num" data-label="Posts">${r.posts}</td>
+      <td class="num" data-label="Replies">${r.replies}</td>
+      <td class="num" data-label="Reposts">${r.reposts}</td>
+      <td class="num" data-label="Repost %">${share}</td>
+      <td class="num ${r.lastActiveMs && r.lastActiveMs < quietMs ? 'dim' : ''}" data-label="Last active">${last}</td>
+      <td data-label="Follows you">${back}</td>
+      <td class="num" data-label="Interacted">${inter}</td>
+      <td class="num" data-label="Followers">${r.followersCount?.toLocaleString() ?? '<span class="dim">—</span>'}</td>
+      <td class="acts-cell"><div class="row-acts">
         <button data-row="posts" title="See their posts from the last ${fv.days} days">Posts</button>
         <a class="row-acts-link" href="https://bsky.app/profile/${esc(r.handle || r.did)}" target="_blank" rel="noopener" title="Open profile on bsky.app">↗</a>
         <button data-row="unfollow" class="bad" title="Unfollow">Unfollow</button>
@@ -1473,6 +1500,23 @@ document.querySelector('.fv-table thead').addEventListener('click', (e) => {
   fv.sort = fv.sort.key === key ? { key, dir: -fv.sort.dir } : { key, dir: firstDir }
   renderFollows()
 })
+
+// On a phone the table becomes cards with no header row, so sorting moves to this menu
+$('#fvSortSel').addEventListener('change', (e) => {
+  const key = e.target.value
+  fv.sort = { key, dir: ['name', 'lastActiveMs'].includes(key) ? 1 : -1 }
+  renderFollows()
+})
+
+function updateFvQuickToggle() {
+  const n = document.querySelectorAll('#fvQuick input[type=checkbox]:checked').length
+  $('#fvQuickToggle').textContent = n ? `Filters (${n})` : 'Filters'
+}
+$('#fvQuickToggle').addEventListener('click', (e) => {
+  const open = $('#fvQuick').classList.toggle('open')
+  e.target.setAttribute('aria-expanded', String(open))
+})
+$('#fvQuick').addEventListener('change', updateFvQuickToggle)
 
 $('#fvAll').addEventListener('change', (e) => {
   for (const r of fv.visible.slice(0, fv.shown)) e.target.checked ? fv.selected.add(r.did) : fv.selected.delete(r.did)
@@ -3284,10 +3328,10 @@ async function refreshStatus() {
     const b = s.backfill
     let text = c.connected ? `Live · ${s.storedPosts.toLocaleString()} posts stored` : (c.error || 'Connecting…')
     if (b.running) text += ` · catching up ${b.done}/${b.total}`
-    $('#status').innerHTML = `<span class="dot ${c.connected ? 'live' : 'down'}"></span>${esc(text)}`
+    $('#status').innerHTML = `<span class="dot ${c.connected ? 'live' : 'down'}"></span><span class="status-text">${esc(text)}</span>`
     return s
   } catch {
-    $('#status').innerHTML = '<span class="dot down"></span>Dashboard server is not running'
+    $('#status').innerHTML = '<span class="dot down"></span><span class="status-text">Dashboard server is not running</span>'
     return null
   }
 }
