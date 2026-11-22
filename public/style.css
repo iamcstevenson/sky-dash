@@ -742,3 +742,25 @@ a.pc-btn:hover { text-decoration: none; border-color: var(--accent); }
   .ls-head .primary { flex: none; }
 }
 .ls-account .h { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- Lists on the Follows tab ---------- */
+.fv-list-sel {
+  font: inherit; font-size: 13px; padding: 5px 10px; border-radius: 999px; max-width: 220px;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+}
+.lists-td { cursor: pointer; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+.lists-td:hover .list-chip { border-color: var(--accent); }
+.list-chip {
+  display: inline-block; max-width: 110px; overflow: hidden; text-overflow: ellipsis; vertical-align: middle;
+  font-size: 12px; padding: 1px 8px; margin-right: 3px; border-radius: 999px;
+  border: 1px solid var(--acct-color); color: var(--text);
+}
+.lt-group { margin-bottom: 14px; }
+.lt-acct { font-weight: 600; margin-bottom: 6px; display: flex; gap: 6px; align-items: center; }
+.lt-row { display: flex; gap: 8px; align-items: center; padding: 4px 0; }
+.lt-new { display: flex; gap: 6px; margin-top: 6px; }
+.lt-new input { flex: 1; min-width: 0; font: inherit; padding: 5px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+@media (max-width: 600px) {
+  .fv-list-sel { max-width: 100%; }
+  .fv-table td.lists-td { max-width: none; white-space: normal; }
+}

@@ -1341,6 +1341,39 @@ const fv = {
   sort: { key: 'lastActiveMs', dir: 1 }, // quietest first
   selected: new Set(),
   shown: 150,
+  // Your curated lists (both accounts) and who is on each: { lists: [{ uri, name, slot, count }], byDid: { did: [uri] } }
+  lists: { lists: [], byDid: {} },
+  listFilter: '', // '' any, 'none' not on any list, or a list's uri
+}
+
+const listsOf = (did) => fv.lists.byDid[did] ?? []
+const listByUri = (uri) => fv.lists.lists.find((l) => l.uri === uri)
+
+async function refreshMemberships() {
+  try {
+    fv.lists = await api('/api/lists/memberships')
+  } catch (err) {
+    toast(`Couldn't read your lists: ${err.message}`)
+  }
+  renderListFilter()
+}
+
+function renderListFilter() {
+  const sel = $('#fvListSel')
+  if (fv.listFilter && fv.listFilter !== 'none' && !listByUri(fv.listFilter)) fv.listFilter = ''
+  sel.innerHTML = `<option value="">Any list</option><option value="none">Not on any list</option>` +
+    fv.lists.lists.map((l) => `<option value="${esc(l.uri)}">On ${LETTERS[l.slot]} · ${esc(l.name)} (${l.count})</option>`).join('')
+  sel.value = fv.listFilter
+}
+
+function listChips(did) {
+  const uris = listsOf(did)
+  if (!uris.length) return '<span class="dim">—</span>'
+  const chips = uris.slice(0, 2).map((u) => {
+    const l = listByUri(u)
+    return l ? `<span class="list-chip acct-${l.slot}" title="${esc(acctName(l.slot))}'s list">${esc(l.name)}</span>` : ''
+  }).join('')
+  return chips + (uris.length > 2 ? `<span class="dim"> +${uris.length - 2}</span>` : '')
 }
 
 function daysAgo(ms) {
@@ -1350,7 +1383,7 @@ function daysAgo(ms) {
 
 async function loadFollows() {
   try {
-    const data = await api('/api/follows')
+    const [data] = await Promise.all([api('/api/follows'), refreshMemberships()])
     fv.rows = data.rows
     fv.days = data.days
     const known = new Set(fv.rows.map((r) => r.did))
@@ -1402,6 +1435,8 @@ function filteredFollows() {
     if (fv.quick.has('never') && r.interactions > 0) return false
     if (fv.quick.has('reposty') && !(r.repostShare >= 0.8 && r.posts + r.replies + r.reposts >= 5)) return false
     if (fv.quick.has('muted') && !r.muted.length) return false
+    if (fv.listFilter === 'none' && listsOf(r.did).length) return false
+    if (fv.listFilter && fv.listFilter !== 'none' && !listsOf(r.did).includes(fv.listFilter)) return false
     return true
   })
 }
@@ -1411,6 +1446,7 @@ function sortValue(r, key) {
     case 'name': return (r.displayName || r.handle || '').toLowerCase()
     case 'followedBy': return r.followedBy.join('')
     case 'followsBack': return r.followsBack.length
+    case 'lists': return listsOf(r.did).length
     case 'repostShare': return r.repostShare ?? -1
     default: return r[key] ?? -1
   }
@@ -1452,10 +1488,12 @@ function renderFollows() {
       <td class="num" data-label="Repost %">${share}</td>
       <td class="num ${r.lastActiveMs && r.lastActiveMs < quietMs ? 'dim' : ''}" data-label="Last active">${last}</td>
       <td data-label="Follows you">${back}</td>
+      <td class="lists-td" data-label="Lists" data-row="lists" title="Change which lists they're on">${listChips(r.did)}</td>
       <td class="num" data-label="Interacted">${inter}</td>
       <td class="num" data-label="Followers">${r.followersCount?.toLocaleString() ?? '<span class="dim">—</span>'}</td>
       <td class="acts-cell"><div class="row-acts">
         <button data-row="posts" title="See their posts from the last ${fv.days} days">Posts</button>
+        <button data-row="lists" title="Add to or remove from your lists">+ List</button>
         <a class="row-acts-link" href="https://bsky.app/profile/${esc(r.handle || r.did)}" target="_blank" rel="noopener" title="Open profile on bsky.app">↗</a>
         <button data-row="unfollow" class="bad" title="Unfollow">Unfollow</button>
       </div></td></tr>`
@@ -1544,7 +1582,84 @@ $('#fvBody').addEventListener('click', (e) => {
   const act = e.target.closest('[data-row]')?.dataset.row
   if (act === 'posts') showAuthor(did, row.handle)
   if (act === 'unfollow') openAction('unfollow', [did])
+  if (act === 'lists') openListToggle(did)
 })
+
+$('#fvListSel').addEventListener('change', (e) => {
+  fv.listFilter = e.target.value
+  fv.shown = 150
+  renderFollows()
+})
+
+// One person's lists: tick or untick each of your lists, or start a new one. Changes apply at once.
+function openListToggle(did) {
+  const row = fv.rows.find((r) => r.did === did)
+  const who = row ? (row.displayName || row.handle || did) : did
+  $('#adTitle').textContent = `Lists for ${who}`
+  const draw = () => {
+    const on = new Set(listsOf(did))
+    const groups = state.accounts.map((a) => {
+      const mine = fv.lists.lists.filter((l) => l.slot === a.slot)
+      return `<div class="lt-group"><div class="lt-acct">${badge(a.slot)} @${esc(a.handle)}</div>
+        ${mine.map((l) => `<label class="lt-row"><input type="checkbox" data-lt="${esc(l.uri)}" data-slot="${l.slot}" ${on.has(l.uri) ? 'checked' : ''}> ${esc(l.name)} <span class="dim">(${l.count})</span></label>`).join('') || '<div class="dim lt-row">No lists yet</div>'}
+        <form class="lt-new" data-slot="${a.slot}"><input maxlength="64" placeholder="New list on ${LETTERS[a.slot]}…" aria-label="New list name"><button class="secondary">Create and add</button></form>
+      </div>`
+    }).join('')
+    $('#adBody').innerHTML = `${groups}<div class="ad-foot"><button class="secondary" data-close>Done</button></div>`
+  }
+  draw()
+  $('#adBody').onchange = async (e) => {
+    const box = e.target.closest('[data-lt]')
+    if (!box) return
+    box.disabled = true
+    const slot = Number(box.dataset.slot)
+    const listUri = box.dataset.lt
+    try {
+      if (box.checked) await api('/api/lists/add', { slot, listUri, dids: [did] })
+      else await api('/api/lists/remove-many', { slot, listUri, dids: [did] })
+      applyMembership([did], listUri, box.checked)
+      renderFollows()
+    } catch (err) {
+      box.checked = !box.checked
+      toast(err.message)
+    } finally {
+      box.disabled = false
+    }
+  }
+  $('#adBody').onsubmit = async (e) => {
+    const form = e.target.closest('.lt-new')
+    if (!form) return
+    e.preventDefault()
+    const name = form.querySelector('input').value.trim()
+    if (!name) return
+    const slot = Number(form.dataset.slot)
+    try {
+      const l = await api('/api/lists/create', { slot, name })
+      await api('/api/lists/add', { slot, listUri: l.uri, dids: [did] })
+      fv.lists.lists.push({ uri: l.uri, name: l.name, slot, count: 0 })
+      applyMembership([did], l.uri, true)
+      renderListFilter()
+      renderFollows()
+      draw()
+    } catch (err) {
+      toast(err.message)
+    }
+  }
+  $('#actionDialog').showModal()
+}
+
+// Updates the local copy of who is on which list after a change, so the table redraws without a reload
+function applyMembership(dids, listUri, on) {
+  const l = listByUri(listUri)
+  for (const did of dids) {
+    const cur = new Set(listsOf(did))
+    const had = cur.has(listUri)
+    if (on && !had) { cur.add(listUri); if (l) l.count++ }
+    if (!on && had) { cur.delete(listUri); if (l) l.count-- }
+    fv.lists.byDid[did] = [...cur]
+  }
+  renderListFilter()
+}
 
 $('#fvBulk').addEventListener('click', (e) => {
   const act = e.target.closest('[data-bulk]')?.dataset.bulk
@@ -1606,14 +1721,14 @@ function openAction(kind, dids) {
       <div class="ad-foot"><button class="secondary" data-close>Cancel</button><button class="primary" id="adGo">Follow</button></div>`
   } else if (kind === 'list') {
     const first = state.accounts.find((a) => follows(a.slot))?.slot ?? state.accounts[0]?.slot
-    $('#adTitle').textContent = `Move ${label} to a list`
+    $('#adTitle').textContent = `Add ${label} to a list`
     body.innerHTML = `${nameList(rows)}
       <p>Add them to a list so you can check on them now and then.</p>
       <div class="ad-row"><label>Account <select id="adListAcct">${state.accounts.map((a) => `<option value="${a.slot}" ${a.slot === first ? 'selected' : ''}>${LETTERS[a.slot]} · @${esc(a.handle)}</option>`).join('')}</select></label></div>
       <div class="ad-row"><label>List <select id="adList"><option>Loading…</option></select></label>
         <input type="text" id="adNewList" placeholder="New list name" value="Check later" maxlength="64" hidden></div>
-      <label class="ad-row"><input type="checkbox" id="adAlsoUnfollow" checked> Also unfollow them from this account</label>
-      <div class="ad-foot"><button class="secondary" data-close>Cancel</button><button class="primary" id="adGo">Move</button></div>`
+      <label class="ad-row"><input type="checkbox" id="adAlsoUnfollow"> Also unfollow them from this account</label>
+      <div class="ad-foot"><button class="secondary" data-close>Cancel</button><button class="primary" id="adGo">Add</button></div>`
     const loadLists = async () => {
       const sel = $('#adList')
       sel.innerHTML = '<option>Loading…</option>'
@@ -1629,6 +1744,15 @@ function openAction(kind, dids) {
     $('#adListAcct').onchange = loadLists
     $('#adList').onchange = () => ($('#adNewList').hidden = $('#adList').value !== '__new')
     loadLists()
+  } else if (kind === 'unlist') {
+    const counts = new Map()
+    for (const r of rows) for (const u of listsOf(r.did)) counts.set(u, (counts.get(u) ?? 0) + 1)
+    const opts = fv.lists.lists.filter((l) => counts.has(l.uri))
+    $('#adTitle').textContent = `Remove ${label} from a list`
+    body.innerHTML = opts.length
+      ? `${nameList(rows)}<div class="ad-row"><label>List <select id="adUnlist">${opts.map((l) => `<option value="${esc(l.uri)}" data-slot="${l.slot}">${LETTERS[l.slot]} · ${esc(l.name)} (${counts.get(l.uri)} of these)</option>`).join('')}</select></label></div>
+        <div class="ad-foot"><button class="secondary" data-close>Cancel</button><button class="primary" id="adGo">Remove</button></div>`
+      : `${nameList(rows)}<p>None of them are on any of your lists.</p><div class="ad-foot"><button class="secondary" data-close>Close</button><button hidden id="adGo"></button></div>`
   }
 
   $('#adGo').onclick = async (e) => {
@@ -1702,6 +1826,7 @@ async function runAction(kind, rows) {
       listUri = (await api('/api/lists/create', { slot, name })).uri
     }
     const added = await api('/api/lists/add', { slot, listUri, dids })
+    await refreshMemberships()
     let msg = `Added ${added.done} to the list`
     if ($('#adAlsoUnfollow').checked) {
       const res = await api('/api/follows/unfollow', { dids, slots: [slot] })
@@ -1710,6 +1835,15 @@ async function runAction(kind, rows) {
     fv.selected.clear()
     await loadFollows()
     toast(msg)
+  } else if (kind === 'unlist') {
+    const sel = $('#adUnlist')
+    const listUri = sel.value
+    const slot = Number(sel.selectedOptions[0].dataset.slot)
+    const res = await api('/api/lists/remove-many', { slot, listUri, dids })
+    applyMembership(dids, listUri, false)
+    fv.selected.clear()
+    renderFollows()
+    toast(`Removed ${res.done} from “${listByUri(listUri)?.name ?? 'the list'}”`)
   }
 }
 
