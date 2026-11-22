@@ -102,18 +102,20 @@
         <input id="fvSearch" type="search" placeholder="Search name or handle" autocomplete="off">
         <select id="fvListSel" class="fv-list-sel" aria-label="Filter by list"><option value="">Any list</option></select>
         <button type="button" class="secondary fv-quick-toggle" id="fvQuickToggle" aria-expanded="false" aria-controls="fvQuick">Filters</button>
-        <select id="fvSortSel" class="fv-sort-sel" aria-label="Sort by">
-          <option value="name">Sort: name</option>
-          <option value="posts">Sort: posts</option>
-          <option value="replies">Sort: replies</option>
-          <option value="reposts">Sort: reposts</option>
-          <option value="repostShare">Sort: repost %</option>
-          <option value="lastActiveMs">Sort: last active</option>
-          <option value="lists">Sort: lists</option>
-          <option value="interactions">Sort: interacted</option>
-          <option value="followersCount">Sort: followers</option>
+        <select id="fvSortSel" class="fv-sort-sel" aria-label="Add a sort column">
+          <option value="">+ Add sort…</option>
+          <option value="name">Name</option>
+          <option value="posts">Posts</option>
+          <option value="replies">Replies</option>
+          <option value="reposts">Reposts</option>
+          <option value="repostShare">Repost %</option>
+          <option value="lastActiveMs">Last active</option>
+          <option value="lists">Lists</option>
+          <option value="interactions">Interacted</option>
+          <option value="followersCount">Followers</option>
         </select>
       </div>
+      <div class="fv-sortbar" id="fvSortBar"></div>
       <div class="fv-quick" id="fvQuick">
         <label class="chip"><input type="checkbox" data-q="quiet"> Quiet 14+ days</label>
         <label class="chip"><input type="checkbox" data-q="low"> At most <input type="number" id="fvLowN" value="3" min="0" max="999"> posts + replies in 14 days</label>
