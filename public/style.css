@@ -609,3 +609,89 @@ a.pc-btn:hover { text-decoration: none; border-color: var(--accent); }
   .kw-form input { flex: 1 1 100%; }
   .kw-form select { flex: 1; max-width: none; }
 }
+
+/* ---------- Phone layout (v2) ---------- */
+/* Desktop keeps the text tabs and inline filters; these pieces only appear on a phone */
+.tab-ico, .tab-short, .filters-toggle, .fv-quick-toggle, .fv-sort-sel { display: none; }
+.tab-ico { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+@media (max-width: 600px) {
+  /* Compact header that slides away while scrolling down */
+  .top {
+    flex-wrap: nowrap; gap: 8px; padding: 6px 12px; padding-top: max(6px, env(safe-area-inset-top));
+    transition: transform .2s ease;
+  }
+  body.scrolled-down .top { transform: translateY(-110%); }
+  .brand { font-size: 15px; }
+  .act-as { margin-left: auto; width: auto; flex: 0 1 auto; }
+  .act-as .label, .status .status-text { display: none; }
+  .act-as button { padding: 3px 9px; }
+
+  /* Every tab on a bottom bar, always visible */
+  .tabs {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+    max-width: none; margin: 0; gap: 0; overflow: visible;
+    padding: 4px 2px calc(4px + env(safe-area-inset-bottom));
+    background: color-mix(in srgb, var(--surface) 95%, transparent); backdrop-filter: blur(8px);
+    border-top: 1px solid var(--border);
+  }
+  .tab {
+    position: relative; flex: 1 1 0; min-width: 0;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    padding: 4px 0 2px; border-bottom: 0; font-size: 10.5px; font-weight: 500;
+  }
+  .tab.active { color: var(--accent); font-weight: 600; }
+  .tab-ico { display: block; width: 22px; height: 22px; }
+  .tab-long { display: none; }
+  .tab-short { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tab .tab-badge { position: absolute; top: 0; left: 50%; margin-left: 4px; }
+  main { padding: 8px 10px calc(78px + env(safe-area-inset-bottom)); }
+
+  /* Post filters fold behind one button; Drafts and New post stay */
+  .filters { gap: 6px; margin-bottom: 8px; }
+  .filters-toggle { display: inline-block; padding: 5px 12px; font-size: 13px; }
+  .filters:not(.open) > .seg, .filters:not(.open) > .check { display: none; }
+  .drafts-btn { margin-left: auto; }
+
+  /* Post headers on one line: the handle gives way first, then the name */
+  .post { grid-template-columns: 36px 1fr; gap: 8px; }
+  .avatar { width: 36px; height: 36px; }
+  .post-body > .meta { flex-wrap: nowrap; min-width: 0; }
+  .post-body > .meta .name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; }
+  .post-body > .meta .handle { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; }
+  .post-body > .meta .time, .post-body > .meta .badges { flex: none; white-space: nowrap; }
+  .card { padding: 10px 12px; }
+  .ctx { margin-left: 6px; padding-left: 8px; }
+  .thread-replies { margin-left: 4px; padding-left: 8px; }
+
+  /* Follows: one card per account, every stat visible, sorting from a menu */
+  .fv-controls input { flex: 1 1 100%; min-width: 0; }
+  .fv-quick-toggle { display: inline-block; padding: 5px 12px; font-size: 13px; }
+  .fv-sort-sel {
+    display: inline-block; font: inherit; font-size: 13px; padding: 5px 10px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--surface-2); color: var(--text); max-width: 100%;
+  }
+  .fv-quick:not(.open) { display: none; }
+  .fv-bulk {
+    position: fixed; top: auto; left: 8px; right: 8px; bottom: calc(64px + env(safe-area-inset-bottom)); z-index: 15;
+    margin: 0; box-shadow: 0 4px 16px rgb(0 0 0 / .25);
+  }
+  .table-wrap { overflow: visible; background: none; border: 0; border-radius: 0; }
+  .fv-table, .fv-table tbody { display: block; }
+  .fv-table thead { display: none; }
+  .fv-table tr {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px;
+    padding: 10px 12px; margin-bottom: 8px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  }
+  .fv-table tr.sel { border-color: var(--accent); }
+  .fv-table tr.sel td { background: none; }
+  .fv-table tr::after { content: ""; order: 3; flex-basis: 100%; height: 0; }
+  .fv-table td { display: block; padding: 0; border: 0; white-space: nowrap; text-align: left; }
+  .fv-table .pick-td { order: 0; }
+  .fv-table .who-td { order: 1; flex: 1 1 0; min-width: 0; }
+  .fv-table .who-cell { min-width: 0; max-width: none; }
+  .fv-table .acts-cell { order: 2; }
+  .fv-table td[data-label] { order: 4; font-size: 12px; }
+  .fv-table td[data-label]::before { content: attr(data-label) " "; color: var(--muted); }
+}

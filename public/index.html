@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Skydash</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path fill='%231083fe' d='M7 5c3.7 2.8 7.6 8.4 9 11.4 1.4-3 5.3-8.6 9-11.4 2.6-2 6.9-3.5 6.9 1.4 0 1-.6 8.2-.9 9.4-1.1 4.1-5.3 5.2-9 4.5 6.5 1.1 8.1 4.7 4.6 8.4-6.8 7-9.7-1.7-10.5-4l-.1-.4-.1.4c-.8 2.3-3.7 11-10.5 4-3.5-3.7-1.9-7.3 4.6-8.4-3.7.7-7.9-.4-9-4.5C.6 14.6 0 7.4 0 6.4 0 1.5 4.3 3 7 5z'/></svg>">
   <link rel="stylesheet" href="style.css">
@@ -20,12 +20,12 @@
   </header>
 
   <nav class="tabs" aria-label="Views">
-    <button class="tab active" data-tab="following">Following</button>
-    <button class="tab" data-tab="notifications">Notifications <span class="tab-badge" id="notifBadge" hidden></span></button>
-    <button class="tab" data-tab="keywords">Keywords</button>
-    <button class="tab" data-tab="follows">Follows</button>
-    <button class="tab" data-tab="trending">Trending</button>
-    <button class="tab" data-tab="discover">Discover</button>
+    <button class="tab active" data-tab="following"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg><span class="tab-long">Following</span><span class="tab-short">Following</span></button>
+    <button class="tab" data-tab="notifications"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0"/></svg><span class="tab-long">Notifications</span><span class="tab-short">Notifs</span><span class="tab-badge" id="notifBadge" hidden></span></button>
+    <button class="tab" data-tab="keywords"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9h14M5 15h14M10 4L8 20M16 4l-2 16"/></svg><span class="tab-long">Keywords</span><span class="tab-short">Keywords</span></button>
+    <button class="tab" data-tab="follows"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21a7 7 0 0 1 14 0M16 3.5a4 4 0 0 1 0 7.5M18 14a6 6 0 0 1 4 7"/></svg><span class="tab-long">Follows</span><span class="tab-short">Follows</span></button>
+    <button class="tab" data-tab="trending"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l6-6 4 4 8-8M15 7h6v6"/></svg><span class="tab-long">Trending</span><span class="tab-short">Trends</span></button>
+    <button class="tab" data-tab="discover"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM15.5 8.5l-2 5-5 2 2-5z"/></svg><span class="tab-long">Discover</span><span class="tab-short">Discover</span></button>
   </nav>
 
   <main>
@@ -93,6 +93,17 @@
       <div class="fv-controls">
         <div class="seg" id="fvOverlap"></div>
         <input id="fvSearch" type="search" placeholder="Search name or handle" autocomplete="off">
+        <button type="button" class="secondary fv-quick-toggle" id="fvQuickToggle" aria-expanded="false" aria-controls="fvQuick">Filters</button>
+        <select id="fvSortSel" class="fv-sort-sel" aria-label="Sort by">
+          <option value="name">Sort: name</option>
+          <option value="posts">Sort: posts</option>
+          <option value="replies">Sort: replies</option>
+          <option value="reposts">Sort: reposts</option>
+          <option value="repostShare">Sort: repost %</option>
+          <option value="lastActiveMs">Sort: last active</option>
+          <option value="interactions">Sort: interacted</option>
+          <option value="followersCount">Sort: followers</option>
+        </select>
       </div>
       <div class="fv-quick" id="fvQuick">
         <label class="chip"><input type="checkbox" data-q="quiet"> Quiet 14+ days</label>
@@ -133,6 +144,7 @@
     </section>
 
     <div class="filters" id="filters">
+      <button type="button" class="secondary filters-toggle" id="filtersToggle" aria-expanded="false" aria-controls="filters">Filters</button>
       <div class="seg" data-filter="type">
         <button data-value="all" class="on">All</button>
         <button data-value="posts">Posts</button>
