@@ -1498,7 +1498,9 @@ function renderFollows() {
       ? (r.followsTarget ? `<span title="Follows @${esc(fv.target?.handle ?? '')}">✓</span>` : `<span class="dim" title="Doesn't follow @${esc(fv.target?.handle ?? '')}">✕</span>`)
       : r.followedBy.map((s) => r.followsBack.includes(s) ? badge(s, `Follows ${acctName(s)}`) : `<span class="dim" title="Doesn't follow ${esc(acctName(s))}">${LETTERS[s]}✕</span>`).join(' ')
     // In another account's view, numbers not read yet show a dash, and capped ones a "+"
-    const num = (v) => isExt() && !r.read ? '<span class="dim">…</span>' : `${v}${r.capped ? '+' : ''}`
+    // Only the largest count is cut off when an account posts more than two pages in the period
+    const top = Math.max(r.posts, r.replies, r.reposts)
+    const num = (v) => isExt() && !r.read ? '<span class="dim">…</span>' : `${v}${r.capped && v === top && v > 0 ? '+' : ''}`
     const inter = r.interactions
       ? `<span title="${Object.entries(r.interactionsBySlot).map(([s, n]) => `${n} with ${acctName(s)}`).join(', ')}; last ${new Date(r.lastInteractionMs).toLocaleDateString()}">${r.interactions.toLocaleString()}</span>`
       : '<span class="dim">0</span>'
