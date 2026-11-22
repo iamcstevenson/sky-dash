@@ -2001,37 +2001,36 @@ function openAction(kind, dids) {
     body.innerHTML = `${nameList(rows)}<p>Follow from:</p>${acctChoices(notYet, () => true)}
       <div class="ad-foot"><button class="secondary" data-close>Cancel</button><button class="primary" id="adGo">Follow</button></div>`
   } else if (kind === 'list') {
-    const first = state.accounts.find((a) => follows(a.slot))?.slot ?? state.accounts[0]?.slot
-    $('#adTitle').textContent = `Add ${label} to a list`
+    // Any number of your lists, on either account; each list is changed by the account that owns it
+    const onList = (uri) => rows.filter((r) => listsOf(r.did).includes(uri)).length
+    $('#adTitle').textContent = `Add ${label} to lists`
     body.innerHTML = `${nameList(rows)}
-      <p>Add them to a list so you can check on them now and then.</p>
-      <div class="ad-row"><label>Account <select id="adListAcct">${state.accounts.map((a) => `<option value="${a.slot}" ${a.slot === first ? 'selected' : ''}>${LETTERS[a.slot]} · @${esc(a.handle)}</option>`).join('')}</select></label></div>
-      <div class="ad-row"><label>List <select id="adList"><option>Loading…</option></select></label>
-        <input type="text" id="adNewList" placeholder="New list name" value="Check later" maxlength="64" hidden></div>
-      <label class="ad-row"><input type="checkbox" id="adAlsoUnfollow"> Also unfollow them from this account</label>
+      ${state.accounts.map((a) => {
+        const mine = fv.lists.lists.filter((l) => l.slot === a.slot)
+        return `<div class="lt-group"><div class="lt-acct">${badge(a.slot)} @${esc(a.handle)}'s lists</div>
+          ${mine.map((l) => {
+            const already = onList(l.uri)
+            return `<label class="lt-row"><input type="checkbox" name="adLists" value="${esc(l.uri)}" data-slot="${l.slot}" ${already === rows.length ? 'disabled' : ''}>
+              ${esc(l.name)} <span class="dim">(${l.count}${already ? `; ${already === rows.length ? 'all' : already} of these already on it` : ''})</span></label>`
+          }).join('') || '<div class="dim lt-row">No lists yet</div>'}
+          <label class="lt-row"><input type="checkbox" class="ad-new-tick" data-slot="${a.slot}"> New list: <input type="text" class="ad-new-name" data-slot="${a.slot}" maxlength="64" placeholder="Name"></label>
+        </div>`
+      }).join('')}
+      <label class="ad-row"><input type="checkbox" id="adAlsoUnfollow"> Also unfollow them from the accounts that own the ticked lists</label>
       <div class="ad-foot"><button class="secondary" data-close>Cancel</button><button class="primary" id="adGo">Add</button></div>`
-    const loadLists = async () => {
-      const sel = $('#adList')
-      sel.innerHTML = '<option>Loading…</option>'
-      try {
-        const lists = await api(`/api/lists?slot=${$('#adListAcct').value}`)
-        sel.innerHTML = lists.map((l) => `<option value="${esc(l.uri)}">${esc(l.name)} (${l.count})</option>`).join('') + '<option value="__new">+ New list…</option>'
-      } catch (err) {
-        sel.innerHTML = '<option value="__new">+ New list…</option>'
-        toast(err.message)
-      }
-      sel.dispatchEvent(new Event('change'))
-    }
-    $('#adListAcct').onchange = loadLists
-    $('#adList').onchange = () => ($('#adNewList').hidden = $('#adList').value !== '__new')
-    loadLists()
+    // Typing a new list's name ticks it
+    body.querySelectorAll('.ad-new-name').forEach((inp) => inp.addEventListener('input', () => {
+      body.querySelector(`.ad-new-tick[data-slot="${inp.dataset.slot}"]`).checked = !!inp.value.trim()
+    }))
   } else if (kind === 'unlist') {
     const counts = new Map()
     for (const r of rows) for (const u of listsOf(r.did)) counts.set(u, (counts.get(u) ?? 0) + 1)
     const opts = fv.lists.lists.filter((l) => counts.has(l.uri))
-    $('#adTitle').textContent = `Remove ${label} from a list`
+    $('#adTitle').textContent = `Remove ${label} from lists`
     body.innerHTML = opts.length
-      ? `${nameList(rows)}<div class="ad-row"><label>List <select id="adUnlist">${opts.map((l) => `<option value="${esc(l.uri)}" data-slot="${l.slot}">${LETTERS[l.slot]} · ${esc(l.name)} (${counts.get(l.uri)} of these)</option>`).join('')}</select></label></div>
+      ? `${nameList(rows)}<p>Take them off:</p>
+        ${opts.map((l) => `<label class="lt-row"><input type="checkbox" name="adLists" value="${esc(l.uri)}" data-slot="${l.slot}">
+          ${badge(l.slot)} ${esc(l.name)} <span class="dim">(${counts.get(l.uri)} of these on it)</span></label>`).join('')}
         <div class="ad-foot"><button class="secondary" data-close>Cancel</button><button class="primary" id="adGo">Remove</button></div>`
       : `${nameList(rows)}<p>None of them are on any of your lists.</p><div class="ad-foot"><button class="secondary" data-close>Close</button><button hidden id="adGo"></button></div>`
   }
@@ -2110,32 +2109,47 @@ async function runAction(kind, rows) {
     await loadFollows()
     toast(summarize('Followed', res))
   } else if (kind === 'list') {
-    const slot = Number($('#adListAcct').value)
-    let listUri = $('#adList').value
-    if (listUri === '__new' || !listUri) {
-      const name = $('#adNewList').value.trim()
-      if (!name) throw new Error('Give the new list a name')
-      listUri = (await api('/api/lists/create', { slot, name })).uri
+    const targets = [...document.querySelectorAll('#adBody input[name=adLists]:checked')].map((b) => ({ uri: b.value, slot: Number(b.dataset.slot) }))
+    for (const tick of document.querySelectorAll('#adBody .ad-new-tick:checked')) {
+      const slot = Number(tick.dataset.slot)
+      const name = document.querySelector(`#adBody .ad-new-name[data-slot="${slot}"]`).value.trim()
+      if (!name) throw new Error(`Give the new list on ${LETTERS[slot]} a name`)
+      targets.push({ name, slot })
     }
-    const added = await api('/api/lists/add', { slot, listUri, dids })
+    if (!targets.length) throw new Error('Tick at least one list')
+    const report = []
+    for (const t of targets) {
+      if (!t.uri) {
+        const created = await api('/api/lists/create', { slot: t.slot, name: t.name })
+        t.uri = created.uri
+        fv.lists.lists.push({ uri: created.uri, name: created.name, slot: t.slot, count: 0 })
+      }
+      const res = await bulkApi('/api/lists/add', { slot: t.slot, listUri: t.uri, dids })
+      const name = listByUri(t.uri)?.name ?? t.name ?? 'list'
+      report.push(`${name}: ${res.done} added${dids.length - res.done ? `, ${dids.length - res.done} already there` : ''}`)
+    }
     await refreshMemberships()
-    let msg = `Added ${added.done} to the list`
+    let msg = report.join(' · ')
     if ($('#adAlsoUnfollow').checked) {
-      const res = await bulkApi('/api/follows/unfollow', { dids, slots: [slot] })
-      msg += ` and unfollowed ${res.done}`
+      const slots = [...new Set(targets.map((t) => t.slot))]
+      const res = await bulkApi('/api/follows/unfollow', { dids, slots })
+      msg += ` · unfollowed ${res.done}`
     }
     fv.selected.clear()
     await loadFollows()
     toast(msg)
   } else if (kind === 'unlist') {
-    const sel = $('#adUnlist')
-    const listUri = sel.value
-    const slot = Number(sel.selectedOptions[0].dataset.slot)
-    const res = await api('/api/lists/remove-many', { slot, listUri, dids })
-    applyMembership(dids, listUri, false)
+    const targets = [...document.querySelectorAll('#adBody input[name=adLists]:checked')].map((b) => ({ uri: b.value, slot: Number(b.dataset.slot) }))
+    if (!targets.length) throw new Error('Tick at least one list')
+    const report = []
+    for (const t of targets) {
+      const res = await bulkApi('/api/lists/remove-many', { slot: t.slot, listUri: t.uri, dids })
+      applyMembership(dids, t.uri, false)
+      report.push(`${listByUri(t.uri)?.name ?? 'list'}: ${res.done} removed`)
+    }
     fv.selected.clear()
     renderFollows()
-    toast(`Removed ${res.done} from “${listByUri(listUri)?.name ?? 'the list'}”`)
+    toast(report.join(' · '))
   }
 }
 
