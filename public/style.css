@@ -734,3 +734,11 @@ a.pc-btn:hover { text-decoration: none; border-color: var(--accent); }
 .ad-field input, .ad-field textarea, .ad-field select {
   font: inherit; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text);
 }
+.ls-account { flex-wrap: nowrap; min-width: 0; max-width: 100%; }
+.ls-account button { min-width: 0; overflow: hidden; text-overflow: ellipsis; display: inline-flex; align-items: center; gap: 4px; }
+@media (max-width: 600px) {
+  .ls-head { flex-wrap: nowrap; }
+  .ls-account { flex: 1 1 auto; }
+  .ls-head .primary { flex: none; }
+}
+.ls-account .h { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
