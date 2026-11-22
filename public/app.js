@@ -1545,8 +1545,13 @@ function renderFollows() {
 }
 
 function renderBulk() {
-  $('#fvBulk').hidden = fv.selected.size === 0
-  $('#fvCount').textContent = `${fv.selected.size} selected`
+  const n = fv.selected.size
+  $('#fvBulk').hidden = n === 0
+  $('#fvCount').textContent = `${n.toLocaleString()} selected`
+  // Offer every row that matches the filters, not just the ones drawn so far
+  const more = fv.visible.filter((r) => !fv.selected.has(r.did)).length
+  $('#fvSelectAll').hidden = !n || !more
+  $('#fvSelectAll').textContent = `Select all ${fv.visible.length.toLocaleString()} that match`
 }
 
 $('#fvOverlap').addEventListener('click', (e) => {
@@ -1679,8 +1684,19 @@ $('#fvBody').addEventListener('click', (e) => {
   const did = tr.dataset.did
   const row = fv.rows.find((r) => r.did === did)
   if (e.target.matches('[data-pick]')) {
-    e.target.checked ? fv.selected.add(did) : fv.selected.delete(did)
-    tr.classList.toggle('sel', e.target.checked)
+    const on = e.target.checked
+    // Shift-click: the same choice for every row between this one and the last one clicked
+    const from = e.shiftKey && fv.lastPick ? fv.visible.findIndex((r) => r.did === fv.lastPick) : -1
+    const to = fv.visible.findIndex((r) => r.did === did)
+    if (from >= 0 && to >= 0) {
+      const [a, b] = from < to ? [from, to] : [to, from]
+      for (const r of fv.visible.slice(a, b + 1)) on ? fv.selected.add(r.did) : fv.selected.delete(r.did)
+      fv.lastPick = did
+      return renderFollows()
+    }
+    on ? fv.selected.add(did) : fv.selected.delete(did)
+    tr.classList.toggle('sel', on)
+    fv.lastPick = did
     renderBulk()
     return
   }
@@ -1929,6 +1945,10 @@ $('#fvBulk').addEventListener('click', (e) => {
     fv.selected.clear()
     return renderFollows()
   }
+  if (act === 'all') {
+    for (const r of fv.visible) fv.selected.add(r.did)
+    return renderFollows()
+  }
   openAction(act, [...fv.selected])
 })
 
@@ -2031,6 +2051,17 @@ function openAction(kind, dids) {
   dlg.showModal()
 }
 
+// Bulk actions take at most 200 accounts per request, so bigger selections go in batches
+async function bulkApi(path, body) {
+  const out = { done: 0, failed: [] }
+  for (let i = 0; i < body.dids.length; i += 200) {
+    const res = await api(path, { ...body, dids: body.dids.slice(i, i + 200) })
+    out.done += res.done ?? 0
+    out.failed.push(...(res.failed ?? []))
+  }
+  return out
+}
+
 function summarize(verb, res) {
   const failed = res.failed?.length ? ` (${res.failed.length} failed: ${res.failed[0].error})` : ''
   return `${verb} ${res.done}${failed}`
@@ -2043,7 +2074,7 @@ async function runAction(kind, rows) {
     if (!slots.length) throw new Error('Choose an account')
     // Remember exactly which follows we remove so Undo can restore them
     const removed = slots.map((s) => [s, rows.filter((r) => r.followedBy.includes(s)).map((r) => r.did)])
-    const res = await api('/api/follows/unfollow', { dids, slots })
+    const res = await bulkApi('/api/follows/unfollow', { dids, slots })
     const failedPairs = new Set((res.failed ?? []).map((f) => `${f.slot}|${f.did}`))
     fv.selected.clear()
     await loadFollows()
@@ -2053,7 +2084,7 @@ async function runAction(kind, rows) {
         let n = 0
         for (const [slot, list] of removed) {
           const back = list.filter((d) => !failedPairs.has(`${slot}|${d}`))
-          if (back.length) n += (await api('/api/follows/follow', { dids: back, slots: [slot] })).done
+          if (back.length) n += (await bulkApi('/api/follows/follow', { dids: back, slots: [slot] })).done
         }
         toast(`Followed ${n} again`)
         loadFollows()
@@ -2062,12 +2093,12 @@ async function runAction(kind, rows) {
   } else if (kind === 'mute') {
     const slots = chosenSlots()
     if (!slots.length) throw new Error('Choose an account')
-    const res = await api('/api/follows/mute', { dids, slots })
+    const res = await bulkApi('/api/follows/mute', { dids, slots })
     await loadFollows()
     toast(summarize('Muted', res), {
       label: 'Undo',
       run: async () => {
-        await api('/api/follows/unmute', { dids, slots })
+        await bulkApi('/api/follows/unmute', { dids, slots })
         toast('Unmuted')
         loadFollows()
       },
@@ -2075,7 +2106,7 @@ async function runAction(kind, rows) {
   } else if (kind === 'follow') {
     const slots = chosenSlots()
     if (!slots.length) throw new Error('Choose an account')
-    const res = await api('/api/follows/follow', { dids, slots })
+    const res = await bulkApi('/api/follows/follow', { dids, slots })
     await loadFollows()
     toast(summarize('Followed', res))
   } else if (kind === 'list') {
@@ -2090,7 +2121,7 @@ async function runAction(kind, rows) {
     await refreshMemberships()
     let msg = `Added ${added.done} to the list`
     if ($('#adAlsoUnfollow').checked) {
-      const res = await api('/api/follows/unfollow', { dids, slots: [slot] })
+      const res = await bulkApi('/api/follows/unfollow', { dids, slots: [slot] })
       msg += ` and unfollowed ${res.done}`
     }
     fv.selected.clear()
