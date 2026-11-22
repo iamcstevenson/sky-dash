@@ -101,7 +101,34 @@ The Follows tab only looks at Christian's own follows, and lists can only be fil
 | Lists on Follows | In both views: a Lists column with each account's lists, a filter for one list or "Not on any list", a per-row list button to tick lists on and off, and bulk Add to list and Remove from list. "Move to list" becomes Add to list with an "Also unfollow" option. |
 | Deleted accounts | Rows whose profile can't be found are labelled "Deleted or deactivated" and have their own filter, so they can be selected and unfollowed together. |
 
+### Follows, version 4 (November 2026)
+
+### Problem
+
+The single-account lookup works well, but finding people means repeating it account by account, the table sorts by one column at a time, selecting many rows is click by click, and bulk list changes go to one list at a time.
+
+### Must have
+
+| Area | Requirement |
+| --- | --- |
+| Group analysis | Select up to 10 of your follows and analyse them together: one table of everyone they follow, with a sortable "Followed by" count (and who, on hover) and a "Followed by at least N" filter. Same actions as the single lookup (New to me, one-click Follow and + List, bulk actions, progress, Refresh). Accounts analysed in the last 24 hours are reused. Groups appear in the recent list. The single-handle lookup stays. |
+| Selection | Shift-click a row's checkbox to select the range from the last one clicked; "Select all that match" selects every filtered row, not just the ones shown. The bulk bar shows the count and says when it's over the 200-per-action limit. |
+| Sorting | Click a header to sort by it alone; shift-click to add it as the next tiebreaker, and again to flip it. Headers show order and direction. A sort bar lists the sort keys with direction toggles and remove buttons, and replaces the phone sort menu. The sort is remembered for your follows and for analyses separately. |
+| Several lists | Bulk Add to list and Remove from list take any number of your lists (grouped by account, plus new list on either account). Each list is changed by the account that owns it, skipping people already on it, and the result is reported per list. |
+
 ### Out of scope
+
+- More than 10 accounts in one group, and keeping groups longer than 24 hours.
+
+### How we know it works
+
+- A group of 6 follows gives one table whose "Followed by" counts match the single lookups.
+- Shift-click range selection and "Select all that match" work.
+- Followers ascending then posts descending sorts correctly and survives a reload.
+- 20 people added to 2 lists in one action show up in the Bluesky app.
+- All of it works at 375 px wide.
+
+## Out of scope
 
 - Keeping analyses permanently, comparing two other accounts with each other, and the other account's interactions.
 
