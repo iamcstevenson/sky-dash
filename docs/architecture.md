@@ -28,6 +28,8 @@ Each account's PDS ────────┘                │
 | `api.ts` | All `/api/*` routes the page uses. |
 | `keywords.ts`, `rules.ts`, `groups.ts` | Keyword search every 2 minutes (multi-word text quoted as a phrase), per-keyword context rules, keyword groups as saved sets. |
 | `follows.ts`, `notifications.ts` | Follow stats and follow-graph actions; interaction history from notifications. |
+| `lists.ts` | Curated lists: list, create, rename, delete, copy, members, list feeds, and which of your lists each account is on (read from the accounts' own records). |
+| `analyze.ts` | Another account's follows with 14-day stats, read from the public AppView and kept 24 hours in `ext_analyses` / `ext_stats` (decision #23). |
 | `notifs.ts` | Notifications tab and Send via chat. |
 | `trending.ts` | Topic extraction and rising/popular/shared scoring. |
 | `discover.ts` | Suggestions and Audition. |
@@ -45,6 +47,7 @@ Everything lives in `data/skydash.db` (ignored by git). Main tables:
 - `follows`, `profiles`, `profile_details`, `author_activity`, `interactions`: follow stats.
 - `keywords`, `keyword_hits`, `keyword_groups`, `keyword_group_members`, `keyword_authors`, `group_authors`: keywords and rules.
 - `auditions`, `discover_dismissed`, `expert_follows`: Discover.
+- `ext_analyses`, `ext_stats`: another account's follows and their 14-day stats, kept 24 hours.
 - `drafts`: drafts; their media files live in `data/drafts/<id>/`.
 - `sessions`, `kv`: sign-in sessions, stream cursor and other state.
 
