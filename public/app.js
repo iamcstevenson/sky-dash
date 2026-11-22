@@ -1435,6 +1435,7 @@ function filteredFollows() {
     if (fv.quick.has('never') && r.interactions > 0) return false
     if (fv.quick.has('reposty') && !(r.repostShare >= 0.8 && r.posts + r.replies + r.reposts >= 5)) return false
     if (fv.quick.has('muted') && !r.muted.length) return false
+    if (fv.quick.has('gone') && !r.gone) return false
     if (fv.listFilter === 'none' && listsOf(r.did).length) return false
     if (fv.listFilter && fv.listFilter !== 'none' && !listsOf(r.did).includes(fv.listFilter)) return false
     return true
@@ -1480,7 +1481,9 @@ function renderFollows() {
     return `<tr data-did="${esc(r.did)}" class="${fv.selected.has(r.did) ? 'sel' : ''}">
       <td class="pick-td"><input type="checkbox" data-pick ${fv.selected.has(r.did) ? 'checked' : ''} aria-label="Select ${esc(r.handle)}"></td>
       <td class="who-td"><div class="who-cell"><img loading="lazy" data-profile="${esc(r.did)}" src="${esc(r.avatar ?? '')}" alt="">
-        <div><b data-profile="${esc(r.did)}">${esc(r.displayName || r.handle || r.did)}</b><small data-profile="${esc(r.did)}">@${esc(r.handle ?? '')}${r.muted.length ? ' · muted' : ''}</small></div></div></td>
+        <div>${r.gone
+          ? `<b class="gone" title="Bluesky no longer shows this profile">Deleted or deactivated</b><small>${esc(r.handle ? '@' + r.handle : r.did)}</small>`
+          : `<b data-profile="${esc(r.did)}">${esc(r.displayName || r.handle || r.did)}</b><small data-profile="${esc(r.did)}">${r.handle ? '@' + esc(r.handle) : 'Loading profile…'}${r.muted.length ? ' · muted' : ''}</small>`}</div></div></td>
       <td data-label="By">${r.followedBy.map((s) => badge(s)).join(' ')}</td>
       <td class="num" data-label="Posts">${r.posts}</td>
       <td class="num" data-label="Replies">${r.replies}</td>

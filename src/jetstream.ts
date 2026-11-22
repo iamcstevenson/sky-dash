@@ -2,7 +2,7 @@
 // by the accounts you follow plus your own two accounts, and writes them to SQLite.
 import { config } from './config.ts'
 import { db, kvGet, kvSet, savePost, deletePost, saveRepost, noteActivity } from './db.ts'
-import { followedDids, ownDids } from './accounts.ts'
+import { followedDids, ownDids, loadProfileSoon } from './accounts.ts'
 import { backfillNewFollow } from './backfill.ts'
 
 const COLLECTIONS = ['app.bsky.feed.post', 'app.bsky.feed.repost', 'app.bsky.graph.follow']
@@ -69,6 +69,7 @@ function handleFollow(did: string, commit: any) {
       ON CONFLICT(account_did, subject_did) DO UPDATE SET follow_uri = excluded.follow_uri`).run(did, subject, uri)
     // Someone neither account followed before has no stored history; fetch their last 14 days
     if (!known) backfillNewFollow(subject)
+    loadProfileSoon(subject)
     refreshWanted()
   } else if (commit.operation === 'delete') {
     db.prepare('DELETE FROM follows WHERE follow_uri = ?').run(uri)

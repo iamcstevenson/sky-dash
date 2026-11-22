@@ -111,16 +111,27 @@ export async function syncFollows(account: Account) {
 
 // Post, follower and following totals for everyone you follow (25 profiles per request)
 export async function refreshProfileCounts() {
+  await refreshProfiles(followedDids())
+}
+
+// Reads profiles 25 at a time and stores names, avatars and counts. Accounts Bluesky leaves out of a
+// successful answer are marked gone (deleted, deactivated or suspended) until they come back.
+export async function refreshProfiles(dids: string[]) {
   const account = accounts.find((a) => a.ok)
-  if (!account) return
-  const dids = followedDids()
+  if (!account || !dids.length) return
   const update = db.prepare(`
     UPDATE profiles SET posts_count = ?, followers_count = ?, follows_count = ?, joined_at = ?,
-      handle = ?, display_name = ?, avatar = ?, updated_at = ? WHERE did = ?`)
+      handle = ?, display_name = ?, avatar = ?, gone_at = NULL, updated_at = ? WHERE did = ?`)
+  const markGone = db.prepare(`
+    INSERT INTO profiles (did, gone_at, updated_at) VALUES (?, ?, ?)
+    ON CONFLICT(did) DO UPDATE SET gone_at = COALESCE(profiles.gone_at, excluded.gone_at), updated_at = excluded.updated_at`)
   for (let i = 0; i < dids.length; i += 25) {
+    const batch = dids.slice(i, i + 25)
     try {
-      const res = await account.agent.app.bsky.actor.getProfiles({ actors: dids.slice(i, i + 25) })
+      const res = await account.agent.app.bsky.actor.getProfiles({ actors: batch })
+      const found = new Set<string>()
       for (const p of res.data.profiles) {
+        found.add(p.did)
         saveProfile(p)
         update.run(
           p.postsCount ?? null,
@@ -134,10 +145,24 @@ export async function refreshProfileCounts() {
           p.did,
         )
       }
+      for (const did of batch) if (!found.has(did)) markGone.run(did, Date.now(), Date.now())
     } catch (err: any) {
       console.error(`Profile counts failed: ${err?.message}`)
     }
   }
+}
+
+// New follows get their profile a few seconds later, in one batch, instead of at the next 6-hourly refresh
+const profileQueue = new Set<string>()
+let profileTimer: NodeJS.Timeout | null = null
+export function loadProfileSoon(did: string) {
+  profileQueue.add(did)
+  profileTimer ??= setTimeout(() => {
+    const dids = [...profileQueue]
+    profileQueue.clear()
+    profileTimer = null
+    refreshProfiles(dids).catch(() => {})
+  }, 3_000)
 }
 
 export function followedDids(): string[] {

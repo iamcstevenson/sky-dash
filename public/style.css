@@ -764,3 +764,4 @@ a.pc-btn:hover { text-decoration: none; border-color: var(--accent); }
   .fv-list-sel { max-width: 100%; }
   .fv-table td.lists-td { max-width: none; white-space: normal; }
 }
+.who-cell b.gone { color: var(--muted); font-style: italic; font-weight: 500; }
