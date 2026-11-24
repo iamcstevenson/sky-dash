@@ -236,6 +236,32 @@ export async function profileCard(actor: string) {
     last: number | null
   }
 
+  // The local database only holds posts from accounts you follow (and their circle). For anyone
+  // else, e.g. a new follower, it has nothing, so the card always said "0 posts, no recent
+  // activity". Then read their latest 100 items straight from Bluesky instead.
+  let stats = { posts: act.posts ?? 0, replies: act.replies ?? 0, reposts: rep.n, last: act.last ?? 0 }
+  if (!act.last && !rep.n) {
+    try {
+      const res = await signed[0].agent.app.bsky.feed.getAuthorFeed({ actor: profile.did, limit: 100, filter: 'posts_with_replies' })
+      const live = { posts: 0, replies: 0, reposts: 0, last: 0 }
+      for (const item of res.data.feed) {
+        const reason: any = item.reason
+        if (reason?.$type === 'app.bsky.feed.defs#reasonPin') continue // a pinned post says nothing about recent activity
+        const isRepost = reason?.$type === 'app.bsky.feed.defs#reasonRepost'
+        const record: any = item.post.record
+        const at = Math.min(Date.parse(isRepost ? reason.indexedAt : record?.createdAt ?? item.post.indexedAt) || 0, Date.now())
+        live.last = Math.max(live.last, at)
+        if (at <= since) continue
+        if (isRepost) live.reposts++
+        else if (record?.reply) live.replies++
+        else live.posts++
+      }
+      stats = live
+    } catch {
+      // keep the local (empty) numbers
+    }
+  }
+
   return {
     did: profile.did,
     handle: profile.handle,
@@ -249,10 +275,10 @@ export async function profileCard(actor: string) {
     relationship,
     stats: {
       days: config.statsDays,
-      posts: act.posts ?? 0,
-      replies: act.replies ?? 0,
-      reposts: rep.n,
-      lastActiveMs: Math.max(act.last ?? 0, seen?.last_active_ms ?? 0),
+      posts: stats.posts,
+      replies: stats.replies,
+      reposts: stats.reposts,
+      lastActiveMs: Math.max(stats.last, seen?.last_active_ms ?? 0),
       interactions: inter.n,
       lastInteractionMs: inter.last ?? 0,
     },
