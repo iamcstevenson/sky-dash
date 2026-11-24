@@ -25,6 +25,15 @@ db.exec(`
     data TEXT
   );
 
+  -- Accounts added from the dashboard (Settings → Accounts). App passwords only, never real ones.
+  -- A slot here takes the place of the same slot in .env.
+  CREATE TABLE IF NOT EXISTS account_creds (
+    slot INTEGER PRIMARY KEY,
+    handle TEXT NOT NULL,
+    app_password TEXT NOT NULL,
+    service TEXT NOT NULL DEFAULT 'https://bsky.social'
+  );
+
   -- Who each of your accounts follows. follow_uri is needed to unfollow.
   CREATE TABLE IF NOT EXISTS follows (
     account_did TEXT NOT NULL,

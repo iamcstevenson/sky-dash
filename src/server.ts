@@ -164,10 +164,8 @@ const server = createServer(async (req, res) => {
 })
 
 async function main() {
-  if (config.accounts.length === 0) {
-    console.log('No accounts configured yet. Copy .env.example to .env and add your app passwords.')
-  }
   await signInAll()
+  if (accounts.length === 0) console.log('No accounts yet: add them in the dashboard (Settings → Accounts).')
   for (const a of accounts) {
     try {
       await syncFollows(a)

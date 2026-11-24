@@ -823,3 +823,14 @@ a.pc-btn:hover { text-decoration: none; border-color: var(--accent); }
 /* Keep every column, including the group's "Followed by", on screen without sideways scrolling on a laptop */
 .fv-table th, .fv-table td { padding: 7px 6px; }
 .who-cell { max-width: 220px; min-width: 160px; }
+
+/* Settings → Accounts */
+.ac-list { list-style: none; padding: 0; margin: 0 0 12px; }
+.ac-list li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px solid var(--border, rgb(127 127 127 / .2)); }
+.ac-list li .pc-btn, .ac-list li > .dim:last-child { margin-left: auto; }
+.ac-form { display: grid; gap: 8px; }
+.ac-form h3 { margin: 4px 0 0; font-size: 1rem; }
+.ac-form p { margin: 0; }
+.ac-form label { display: grid; gap: 4px; }
+.ac-form input { font: inherit; padding: 6px 8px; }
+.ac-form .primary { justify-self: start; }

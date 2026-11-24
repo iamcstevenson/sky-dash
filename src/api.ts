@@ -1,7 +1,7 @@
 import { RichText } from '@atproto/api'
 import { config } from './config.ts'
 import { db, kvGet, kvSet } from './db.ts'
-import { accounts, accountBySlot, followCounts } from './accounts.ts'
+import { accounts, accountBySlot, followCounts, addAccount, removeAccount, configuredCount, MAX_ACCOUNTS } from './accounts.ts'
 import { collector } from './jetstream.ts'
 import { backfill } from './backfill.ts'
 import { hydrate, forget, primaryAccount } from './hydrate.ts'
@@ -226,14 +226,18 @@ function feedgenInfo() {
 
 const routes: Record<string, Handler> = {
   'GET /api/status': async () => ({
-    accounts: accounts.map((a) => ({ slot: a.slot, handle: a.handle, did: a.did, ok: a.ok, error: a.error })),
-    configured: config.accounts.length,
+    accounts: accounts.map((a) => ({ slot: a.slot, handle: a.handle, did: a.did, ok: a.ok, error: a.error, source: a.source })),
+    configured: configuredCount(),
+    maxAccounts: MAX_ACCOUNTS,
     follows: followCounts(),
     collector: { ...collector, lastEventMs: Math.floor(collector.lastEventUs / 1000) },
     backfill,
     storedPosts: (db.prepare('SELECT COUNT(*) n FROM posts').get() as { n: number }).n,
     feedHours: config.feedHours,
   }),
+
+  'POST /api/accounts/add': async (_q, b) => addAccount(b),
+  'POST /api/accounts/remove': async (_q, b) => removeAccount(b),
 
   'GET /api/sync/state': async () => syncState(),
   'GET /api/sync/export': async (q) => {

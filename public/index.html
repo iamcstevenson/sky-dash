@@ -16,6 +16,7 @@
     <div class="brand">Skydash</div>
     <div class="act-as" id="actAs" role="radiogroup" aria-label="Act as account"></div>
     <div class="status" id="status" title="Collector status"></div>
+    <button class="theme-btn" id="accountsBtn" type="button" title="Accounts" aria-label="Accounts">⚙</button>
     <button class="theme-btn" id="themeBtn" type="button"></button>
   </header>
 
@@ -238,6 +239,23 @@
         <div id="composeError" class="error"></div>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="accountsDialog" class="sheet">
+    <div class="sheet-head"><span>Accounts</span><button class="icon-btn" data-close aria-label="Close">✕</button></div>
+    <div class="sheet-body">
+      <div id="acList"></div>
+      <form id="acForm" class="ac-form">
+        <h3>Add an account</h3>
+        <p class="dim">Use an <b>app password</b>, never your real one. In Bluesky, signed in as that account:
+          Settings → Privacy and Security → App Passwords → Add App Password.</p>
+        <label>Handle <input id="acHandle" placeholder="name.bsky.social" autocomplete="off" autocapitalize="off" spellcheck="false" required></label>
+        <label>App password <input id="acPassword" placeholder="xxxx-xxxx-xxxx-xxxx" autocomplete="off" autocapitalize="off" spellcheck="false" required></label>
+        <button type="submit" class="primary" id="acAdd">Add account</button>
+        <div id="acError" class="error"></div>
+      </form>
+      <p id="acRestarting" class="dim" hidden>Signing in and restarting Skydash… this page reloads by itself in about 15 seconds.</p>
+    </div>
   </dialog>
 
   <dialog id="actionDialog" class="sheet">
