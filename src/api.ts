@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { RichText } from '@atproto/api'
 import { config } from './config.ts'
 import { db, kvGet, kvSet } from './db.ts'
@@ -29,6 +30,29 @@ export class HttpError extends Error {
     super(message)
     this.status = status
   }
+}
+
+// The commit this server runs (read from .git, no git command needed), shown on the status line
+let versionCache: string | null = null
+function codeVersion() {
+  if (versionCache !== null) return versionCache
+  try {
+    const gitDir = new URL('../.git/', import.meta.url)
+    let ref = readFileSync(new URL('HEAD', gitDir), 'utf8').trim()
+    if (ref.startsWith('ref: ')) {
+      const name = ref.slice(5)
+      try {
+        ref = readFileSync(new URL(name, gitDir), 'utf8').trim()
+      } catch {
+        const packed = readFileSync(new URL('packed-refs', gitDir), 'utf8')
+        ref = packed.split('\n').find((l) => l.endsWith(` ${name}`))?.split(' ')[0] ?? ''
+      }
+    }
+    versionCache = ref.slice(0, 7)
+  } catch {
+    versionCache = ''
+  }
+  return versionCache
 }
 
 function account(slot: unknown) {
@@ -226,6 +250,7 @@ function feedgenInfo() {
 
 const routes: Record<string, Handler> = {
   'GET /api/status': async () => ({
+    version: codeVersion(),
     accounts: accounts.map((a) => ({ slot: a.slot, handle: a.handle, did: a.did, ok: a.ok, error: a.error, source: a.source })),
     configured: configuredCount(),
     maxAccounts: MAX_ACCOUNTS,
