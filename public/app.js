@@ -2706,9 +2706,11 @@ let composeTarget = {}
 
 // draft: a saved draft to keep editing (see "drafts" below)
 function openCompose({ replyTo, quote, draft } = {}) {
-  composeTarget = { replyTo: replyTo?.uri ?? draft?.reply_to ?? undefined, quote: quote?.uri }
+  composeTarget = { replyTo: replyTo?.uri ?? draft?.reply_to ?? undefined, quote: quote?.uri ?? draft?.quote ?? undefined }
   composeDraft = draft ? { id: draft.id, updatedAt: draft.updated_at } : null
-  $('#composeTitle').textContent = composeTarget.replyTo ? (draft ? 'Reply draft' : 'Reply') : quote ? 'Quote post' : draft ? 'Draft' : 'New post'
+  composeSent = false
+  setScheduleMode(false)
+  $('#composeTitle').textContent = composeTarget.replyTo ? (draft ? 'Reply draft' : 'Reply') : composeTarget.quote ? (draft ? 'Quote draft' : 'Quote post') : draft ? 'Draft' : 'New post'
   const ctx = replyTo || quote
   $('#composeContext').innerHTML = ctx ? `<div class="card">${renderPost(ctx, { small: true })}</div>` : ''
   $('#composeAs').innerHTML = state.accounts
@@ -2731,15 +2733,27 @@ function openCompose({ replyTo, quote, draft } = {}) {
     renderComposeVideo()
   }
   renderDraftNote(draft)
-  // Drafts hold posts and replies; a quote post can't be saved as one
-  $('#composeSaveDraft').hidden = !!quote
+  // Waiting to post: hold it while you edit. Post sends it in 2 minutes; closing keeps its time.
+  if (draft?.post_at) {
+    composeDraft.resumeAt = draft.post_at
+    api('/api/drafts/schedule', { id: draft.id, postAt: null }).catch(() => {})
+    const note = $('#composeDraftNote')
+    note.hidden = false
+    note.innerHTML = `On hold while you edit (it was set for ${esc(when(draft.post_at))}). <b>Post</b> sends it in 2 minutes; closing keeps the time it had.`
+  }
+  if (draft?.post_error) {
+    const note = $('#composeDraftNote')
+    note.hidden = false
+    note.insertAdjacentHTML('beforeend', `<div class="err">Last try failed: ${esc(draft.post_error)}</div>`)
+  }
+  $('#composeSaveDraft').hidden = false
   renderComposeImages()
   updateCount()
   $('#composeDialog').showModal()
   $('#composeText').focus()
-  // The post being replied to, when the draft only knows its address
-  if (draft?.reply_to) {
-    api(`/api/post?uri=${encodeURIComponent(draft.reply_to)}`)
+  // The post being replied to or quoted, when the draft only knows its address
+  if (draft?.reply_to || draft?.quote) {
+    api(`/api/post?uri=${encodeURIComponent(draft.reply_to || draft.quote)}`)
       .then(({ post }) => {
         if (post && composeDraft?.id === draft.id) $('#composeContext').innerHTML = `<div class="card">${renderPost(post, { small: true })}</div>`
       })
@@ -2776,30 +2790,77 @@ $('#composeForm').addEventListener('submit', async (e) => {
     if (composeVideo && !composeVideo.alt.trim() && !confirm("The video has no alt text. People using screen readers won't know what it shows.\n\nPost anyway?")) return
     const missingAlt = composeImages.filter((img) => !img.alt.trim()).length
     if (missingAlt && !confirm(`${missingAlt === 1 ? '1 image has' : `${missingAlt} images have`} no alt text. People using screen readers won't know what ${missingAlt === 1 ? 'it shows' : 'they show'}.\n\nPost anyway?`)) return
-    send.textContent = composeImages.length || composeVideo ? 'Uploading…' : 'Posting…'
-    if (composeDraft) {
-      // A draft is saved, then Skydash posts it with its stored photos or video
-      const saved = await saveComposeDraft()
-      if (saved.outcome !== 'saved') return
-      await api('/api/drafts/post', { id: composeDraft.id, by: 'mac' })
-      refreshDraftCount()
-    } else {
-      const images = composeImages.map(({ data, mime, alt, width, height }) => ({ data, mime, alt, width, height }))
-      const video = composeVideo
-        ? { blob: composeVideo.blob, alt: composeVideo.alt, width: composeVideo.width, height: composeVideo.height }
-        : undefined
-      await api('/api/compose', { slot, text: $('#composeText').value, images, video, ...composeTarget })
+    // Everything goes out through a draft that the server posts later: in 2 minutes (time to fix typos),
+    // or at the scheduled time. The box closes right away.
+    let postAt = Date.now() + POST_DELAY_MS
+    if (scheduling) {
+      postAt = new Date($('#composeWhen').value).getTime()
+      if (!postAt || postAt < Date.now() + 60_000) throw new Error('Pick a time at least a minute from now')
     }
+    if (!$('#composeText').value.trim() && !composeImages.length && !composeVideo) throw new Error('Write something or add an image or video')
+    send.textContent = composeImages.length || composeVideo ? 'Saving…' : 'Queueing…'
+    const saved = await saveComposeDraft()
+    if (saved.outcome !== 'saved') return
+    const id = composeDraft.id
+    await api('/api/drafts/schedule', { id, postAt })
+    composeSent = true
     $('#composeDialog').close()
-    toast(`Posted as ${acctName(slot)}`)
-    if (composeTarget.replyTo) refreshPost(composeTarget.replyTo).catch(() => {})
+    refreshDraftCount()
+    toast(scheduling ? `Scheduled for ${when(postAt)} as ${acctName(slot)}` : `Posting in 2 minutes as ${acctName(slot)}`, { label: 'Edit', run: () => editDraftById(id) })
   } catch (err) {
     $('#composeError').textContent = err.message
   } finally {
     send.disabled = false
-    send.textContent = 'Post'
+    send.textContent = scheduling ? 'Schedule' : 'Post'
   }
 })
+
+// ---------- Post in 2 minutes / Schedule ----------
+
+const POST_DELAY_MS = 2 * 60_000
+let scheduling = false
+let composeSent = false
+
+function setScheduleMode(on) {
+  scheduling = on
+  $('#composeWhenRow').hidden = !on
+  $('#composeScheduleBtn').hidden = on
+  $('#composeSend').textContent = on ? 'Schedule' : 'Post'
+  $('#composeHint').hidden = on
+  if (on && !$('#composeWhen').value) {
+    // Default: the next whole hour, at least 30 minutes away, in local time
+    const d = new Date(Date.now() + 30 * 60_000)
+    d.setMinutes(0, 0, 0)
+    d.setHours(d.getHours() + 1)
+    const pad = (n) => String(n).padStart(2, '0')
+    $('#composeWhen').value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  }
+  if (!on) $('#composeWhen').value = ''
+}
+$('#composeScheduleBtn').addEventListener('click', () => setScheduleMode(true))
+$('#composeWhenCancel').addEventListener('click', () => setScheduleMode(false))
+
+// Closing a post that was waiting (opened to edit) keeps your edits and puts it back in line
+$('#composeDialog').addEventListener('close', async () => {
+  const d = composeDraft
+  if (!d?.resumeAt || composeSent) return
+  composeSent = true
+  try {
+    await saveComposeDraft()
+  } catch {}
+  const postAt = Math.max(d.resumeAt, Date.now() + 30_000)
+  await api('/api/drafts/schedule', { id: d.id, postAt }).catch((err) => toast(err.message))
+  refreshDraftCount()
+  toast(`Still set to post ${postAt - Date.now() < 5 * 60_000 ? 'shortly' : `at ${when(postAt)}`}`)
+})
+
+async function editDraftById(id) {
+  try {
+    openCompose({ draft: await api(`/api/drafts/get?id=${encodeURIComponent(id)}`) })
+  } catch (err) {
+    toast(err.message)
+  }
+}
 
 // ---------- drafts (shared with the Hub iPhone app) ----------
 
@@ -2898,6 +2959,7 @@ async function saveComposeDraft() {
     slot: Number($('#composeAs').value),
     text: $('#composeText').value,
     replyTo: composeTarget.replyTo ?? null,
+    quote: composeTarget.quote ?? null,
     media,
     baseUpdatedAt: composeDraft?.updatedAt ?? null,
     editedAt: Date.now(),
@@ -2918,10 +2980,12 @@ $('#composeSaveDraft').addEventListener('click', async () => {
   btn.disabled = true
   $('#composeError').textContent = ''
   try {
+    const wasWaiting = !!composeDraft?.resumeAt
     const res = await saveComposeDraft()
     if (res.outcome === 'saved') {
+      composeSent = true // a post that was waiting stays a draft: Save draft means "don't post it yet"
       $('#composeDialog').close()
-      toast('Draft saved')
+      toast(wasWaiting ? "Saved as a draft; it won't post until you post it" : 'Draft saved')
     }
   } catch (err) {
     $('#composeError').textContent = err.message
@@ -2937,11 +3001,24 @@ $('#composeDraftNote').addEventListener('click', async (e) => {
   renderDraftNote(null)
 })
 
+// Ids waiting to post at the last check, to say when one goes out (or fails)
+let queuedIds = null
+
 async function refreshDraftCount() {
   try {
     const { drafts } = await api('/api/drafts')
-    const open = drafts.filter((d) => !d.posted_at && !d.deleted_at).length
-    $('#draftsBtn').textContent = open ? `Drafts (${open})` : 'Drafts'
+    const queued = drafts.filter((d) => d.post_at && !d.posted_at && !d.deleted_at)
+    const open = drafts.filter((d) => !d.posted_at && !d.deleted_at && !d.post_at).length
+    $('#draftsBtn').textContent = [open ? `Drafts (${open})` : 'Drafts', queued.length ? `⏳ ${queued.length}` : ''].filter(Boolean).join(' · ')
+    $('#draftsBtn').title = queued.length ? `${queued.length} waiting to post` : ''
+    if (queuedIds) {
+      for (const d of drafts) {
+        if (!queuedIds.has(d.id)) continue
+        if (d.posted_at) toast(`Posted as ${acctName(d.slot)}`)
+        else if (d.post_error && !d.post_at) toast(`Couldn't post: ${d.post_error}`, { label: 'Open', run: () => editDraftById(d.id) })
+      }
+    }
+    queuedIds = new Set(queued.map((d) => d.id))
     return drafts
   } catch {
     return null
@@ -2954,10 +3031,22 @@ function draftRow(d) {
     : `<span class="thumb-missing">${m.kind === 'video' ? 'Video' : 'Photo'}</span>`).join('')
   const meta = [
     badge(d.slot),
-    d.reply_to ? 'Reply' : 'Post',
-    `edited ${when(d.updated_at)} on ${place(d.updated_by)}`,
+    d.reply_to ? 'Reply' : d.quote ? 'Quote' : 'Post',
+    d.post_at ? `<b>posts ${esc(postsIn(d.post_at))}</b>` : `edited ${when(d.updated_at)} on ${place(d.updated_by)}`,
   ].join(' · ')
-  const note = replacedNote(d)
+  const note = replacedNote(d) + (d.post_error ? `<div class="err">Couldn't post: ${esc(d.post_error)}</div>` : '')
+  if (d.post_at) {
+    return `<div class="card draft-row draft-queued" data-draft="${esc(d.id)}">
+      <div class="draft-meta">${meta}</div>
+      <div class="draft-text ${d.text.trim() ? '' : 'empty'}">${esc(d.text.trim() || '(no text)')}</div>
+      ${thumbs ? `<div class="draft-thumbs">${thumbs}</div>` : ''}
+      <div class="draft-actions">
+        <button class="secondary" data-draft-unqueue title="Don't post it; keep it as a draft">Cancel</button>
+        <button class="secondary" data-draft-edit>Edit</button>
+        <button class="primary" data-draft-postnow ${d.posting ? 'disabled' : ''}>${d.posting ? 'Posting…' : 'Post now'}</button>
+      </div>
+    </div>`
+  }
   return `<div class="card draft-row" data-draft="${esc(d.id)}">
     <div class="draft-meta">${meta}</div>
     ${note ? `<div class="draft-note">${note}</div>` : ''}
@@ -2989,10 +3078,12 @@ async function openDrafts() {
   if (!$('#actionDialog').open) $('#actionDialog').showModal()
   const drafts = (await refreshDraftCount()) ?? []
   draftsById = new Map(drafts.map((d) => [d.id, d]))
-  const open = drafts.filter((d) => !d.posted_at && !d.deleted_at)
+  const queued = drafts.filter((d) => d.post_at && !d.posted_at && !d.deleted_at).sort((a, b) => a.post_at - b.post_at)
+  const open = drafts.filter((d) => !d.posted_at && !d.deleted_at && !d.post_at)
   // A deleted draft that was never saved here has no account or text worth showing
   const done = drafts.filter((d) => (d.posted_at || d.deleted_at) && d.slot)
   $('#adBody').innerHTML = `
+    ${queued.length ? `<div class="draft-section">Waiting to post</div><div class="draft-list">${queued.map(draftRow).join('')}</div><div class="draft-section">Drafts</div>` : ''}
     <p class="dim">Drafts are shared with Hub on your iPhone. If both change the same draft, the newest edit wins and the other is noted on it.</p>
     <div class="draft-list">${open.length ? open.map(draftRow).join('') : '<p class="dim">No drafts. Use “Save draft” in the post box.</p>'}</div>
     ${done.length ? `<div class="draft-section">Finished in the last week</div><div class="draft-list">${done.map(doneRow).join('')}</div>` : ''}`
@@ -3019,10 +3110,18 @@ $('#adBody').addEventListener('click', async (e) => {
       openDrafts()
     } else if (e.target.closest('[data-draft-post]')) {
       if (!d.text.trim() && !d.media.length) return toast('This draft is empty')
-      if (!confirm(`Post this as ${acctName(d.slot)}?`)) return
+      await api('/api/drafts/schedule', { id: d.id, postAt: Date.now() + POST_DELAY_MS })
+      toast(`Posting in 2 minutes as ${acctName(d.slot)}`)
+      openDrafts()
+    } else if (e.target.closest('[data-draft-unqueue]')) {
+      await api('/api/drafts/schedule', { id: d.id, postAt: null })
+      toast('Not posted; kept as a draft')
+      openDrafts()
+    } else if (e.target.closest('[data-draft-postnow]')) {
       e.target.disabled = true
       e.target.textContent = 'Posting…'
       await api('/api/drafts/post', { id: d.id, by: 'mac' })
+      queuedIds?.delete(d.id)
       toast(`Posted as ${acctName(d.slot)}`)
       openDrafts()
     }
@@ -3032,6 +3131,16 @@ $('#adBody').addEventListener('click', async (e) => {
   }
 })
 refreshDraftCount()
+// Keeps the ⏳ count current and says when a waiting post goes out
+setInterval(() => refreshDraftCount(), 15_000)
+
+// "in 1 min", "at 3:40 PM" etc. for a waiting post
+function postsIn(ms) {
+  const left = ms - Date.now()
+  if (left <= 30_000) return 'any moment'
+  if (left < 60 * 60_000) return `in ${Math.ceil(left / 60_000)} min`
+  return `at ${when(ms)}`
+}
 
 // ---------- images in the compose box ----------
 

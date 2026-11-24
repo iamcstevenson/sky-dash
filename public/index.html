@@ -234,8 +234,14 @@
           <label>Posting as <select id="composeAs"></select></label>
           <span id="composeCount" class="count">300</span>
           <button type="button" class="secondary" id="composeSaveDraft">Save draft</button>
-          <button type="submit" class="primary" id="composeSend">Post</button>
+          <button type="button" class="secondary" id="composeScheduleBtn" title="Post at a time you pick">🕒 Schedule…</button>
+          <button type="submit" class="primary" id="composeSend" title="Posts in 2 minutes, so you can still fix typos">Post</button>
         </div>
+        <div id="composeWhenRow" class="compose-when" hidden>
+          <label>Post at <input type="datetime-local" id="composeWhen"></label>
+          <button type="button" class="secondary" id="composeWhenCancel">Don't schedule</button>
+        </div>
+        <p class="dim compose-hint" id="composeHint">Post waits 2 minutes before it goes to Bluesky, so you can still fix typos (Drafts → Edit).</p>
         <div id="composeError" class="error"></div>
       </div>
     </form>

@@ -9,7 +9,7 @@ import { prune } from './db.ts'
 import { accounts, signInAll, syncFollows, refreshProfileCounts } from './accounts.ts'
 import { startCollector, stopCollector, refreshWanted } from './jetstream.ts'
 import { runBackfill, startHeartbeat } from './backfill.ts'
-import { handleApi, HttpError } from './api.ts'
+import { handleApi, HttpError, startScheduler } from './api.ts'
 import { startKeywordPolling } from './keywords.ts'
 import { startFeedgen } from './feedgen.ts'
 import { startNotificationSync } from './notifications.ts'
@@ -181,6 +181,7 @@ async function main() {
   startFeedgen()
   startNotificationSync()
   startDiscoverRefresh()
+  startScheduler()
   refreshProfileCounts().catch(() => {})
 
   // Re-sync follow lists every 6 hours in case changes were missed, and prune old posts hourly

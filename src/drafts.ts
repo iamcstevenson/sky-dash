@@ -34,7 +34,17 @@ db.exec(`
   );
 `)
 
+// Waiting to post (Post waits 2 minutes so typos can be fixed; Schedule picks a time). The server posts a
+// draft when post_at arrives, even with no page open. quote: the post a quote post quotes.
+for (const [col, type] of [['post_at', 'INTEGER'], ['quote', 'TEXT'], ['post_error', 'TEXT']]) {
+  const cols = db.prepare('PRAGMA table_info(drafts)').all() as { name: string }[]
+  if (!cols.some((c) => c.name === col)) db.exec(`ALTER TABLE drafts ADD COLUMN ${col} ${type}`)
+}
+// Nothing is mid-post when the server starts, so a draft left marked "posting" by a crash can be posted again
+db.exec('UPDATE drafts SET posting = 0 WHERE posting = 1 AND posted_at IS NULL')
+
 const KEEP_FINISHED_MS = 7 * 86_400_000
+const MAX_SCHEDULE_MS = 366 * 86_400_000
 const MAX_IMAGES = 4
 const MAX_IMAGE_BYTES = 2_000_000
 const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
@@ -60,6 +70,9 @@ type Row = {
   posted_by: Device | null
   deleted_at: number | null
   deleted_by: Device | null
+  post_at: number | null
+  quote: string | null
+  post_error: string | null
 }
 
 function fail(status: number, message: string): never {
@@ -113,6 +126,9 @@ function view(r: Row) {
     posted_by: r.posted_by,
     deleted_at: r.deleted_at,
     deleted_by: r.deleted_by,
+    post_at: r.post_at,
+    quote: r.quote,
+    post_error: r.post_error,
   }
 }
 export type DraftView = ReturnType<typeof view>
@@ -195,6 +211,9 @@ export function saveDraft(b: any): { outcome: SaveOutcome; draft: DraftView | nu
   if (replyTo && !replyTo.startsWith('at://')) fail(400, 'Bad reply target')
   const media = cleanMedia(id, b?.media)
   const cur = row(id)
+  // Hub doesn't know about quotes, so a save that leaves it out keeps the one already there
+  const quote = b?.quote === undefined ? (cur?.quote ?? null) : b.quote ? String(b.quote) : null
+  if (quote && !quote.startsWith('at://')) fail(400, 'Bad quote target')
 
   if (cur?.posted_at) fail(409, `This draft was already posted from ${place(cur.posted_by)}`)
   if (cur?.deleted_at && cur.deleted_at >= editedAt) {
@@ -203,12 +222,12 @@ export function saveDraft(b: any): { outcome: SaveOutcome; draft: DraftView | nu
   }
   const write = (replaced: unknown) => {
     db.prepare(
-      `INSERT INTO drafts (id, slot, text, reply_to, media, created_at, updated_at, updated_by, replaced)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO drafts (id, slot, text, reply_to, quote, media, created_at, updated_at, updated_by, replaced)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET slot = excluded.slot, text = excluded.text, reply_to = excluded.reply_to,
-         media = excluded.media, updated_at = excluded.updated_at, updated_by = excluded.updated_by,
+         quote = excluded.quote, media = excluded.media, updated_at = excluded.updated_at, updated_by = excluded.updated_by,
          replaced = excluded.replaced, deleted_at = NULL, deleted_by = NULL`,
-    ).run(id, slot, text, replyTo, JSON.stringify(media), cur?.created_at ?? editedAt, editedAt, by, replaced ? JSON.stringify(replaced) : null)
+    ).run(id, slot, text, replyTo, quote, JSON.stringify(media), cur?.created_at ?? editedAt, editedAt, by, replaced ? JSON.stringify(replaced) : null)
     prune(id, media)
   }
   if (!cur || cur.deleted_at) {
@@ -252,7 +271,7 @@ export function deleteDraft(b: any): { outcome: 'deleted' | 'kept-newer' | 'post
       `INSERT INTO drafts (id, slot, created_at, updated_at, updated_by, deleted_at, deleted_by) VALUES (?, 0, ?, ?, ?, ?, ?)`,
     ).run(id, editedAt, editedAt, by, editedAt, by)
   } else if (!cur.deleted_at) {
-    db.prepare('UPDATE drafts SET deleted_at = ?, deleted_by = ?, media = ? WHERE id = ?').run(editedAt, by, '[]', id)
+    db.prepare('UPDATE drafts SET deleted_at = ?, deleted_by = ?, media = ?, post_at = NULL WHERE id = ?').run(editedAt, by, '[]', id)
   }
   rmSync(dirFor(id), { recursive: true, force: true })
   return { outcome: 'deleted' }
@@ -284,7 +303,7 @@ export async function startPosting(idIn: unknown) {
       const blob = job.blob ?? (await waitForVideo(job.jobId))
       video = { blob, alt: v.alt, width: v.width, height: v.height }
     }
-    return { slot: cur.slot, text: cur.text, replyTo: cur.reply_to ?? undefined, images, video }
+    return { slot: cur.slot, text: cur.text, replyTo: cur.reply_to ?? undefined, quote: cur.quote ?? undefined, images, video }
   } catch (err) {
     db.prepare('UPDATE drafts SET posting = 0 WHERE id = ?').run(id)
     throw err
@@ -293,7 +312,7 @@ export async function startPosting(idIn: unknown) {
 
 export function finishPosting(id: string, by: Device, postedUri: string | null) {
   if (postedUri) {
-    db.prepare('UPDATE drafts SET posting = 0, posted_at = ?, posted_uri = ?, posted_by = ?, media = ? WHERE id = ?').run(
+    db.prepare('UPDATE drafts SET posting = 0, posted_at = ?, posted_uri = ?, posted_by = ?, media = ?, post_at = NULL, post_error = NULL WHERE id = ?').run(
       Date.now(),
       postedUri,
       by,
@@ -304,6 +323,37 @@ export function finishPosting(id: string, by: Device, postedUri: string | null) 
   } else {
     db.prepare('UPDATE drafts SET posting = 0 WHERE id = ?').run(id)
   }
+}
+
+// b: { id, postAt }: postAt (ms) puts the draft in line to post then; null takes it out of line (it stays a draft)
+export function scheduleDraft(b: any) {
+  const id = cleanId(b?.id)
+  const cur = row(id)
+  if (!cur || cur.deleted_at) fail(404, 'This draft was deleted')
+  if (cur.posted_at) fail(409, `This was already posted from ${place(cur.posted_by)}`)
+  if (b?.postAt == null) {
+    db.prepare('UPDATE drafts SET post_at = NULL WHERE id = ?').run(id)
+    return { draft: view(row(id)!) }
+  }
+  const postAt = Math.round(Number(b.postAt))
+  if (!Number.isFinite(postAt) || postAt < Date.now() - 60_000) fail(400, 'Pick a time in the future')
+  if (postAt > Date.now() + MAX_SCHEDULE_MS) fail(400, 'Pick a time within a year')
+  if (!cur.text.trim() && !mediaOf(cur).length) fail(400, 'Write something or add an image or video')
+  db.prepare('UPDATE drafts SET post_at = ?, post_error = NULL WHERE id = ?').run(postAt, id)
+  return { draft: view(row(id)!) }
+}
+
+// Drafts whose time has come, oldest first
+export function dueDrafts(): string[] {
+  const rows = db
+    .prepare('SELECT id FROM drafts WHERE post_at <= ? AND posted_at IS NULL AND deleted_at IS NULL AND posting = 0 ORDER BY post_at')
+    .all(Date.now()) as { id: string }[]
+  return rows.map((r) => r.id)
+}
+
+// A queued post that failed stays as a draft, out of line, with the reason shown on it
+export function failScheduled(id: string, message: string) {
+  db.prepare('UPDATE drafts SET post_at = NULL, post_error = ? WHERE id = ?').run(message.slice(0, 500), id)
 }
 
 // A photo or video for a draft, streamed as the request body. Hub Agent sends the phone's files this way.
