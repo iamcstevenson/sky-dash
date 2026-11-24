@@ -20,11 +20,11 @@ if [ ! -d /opt/skydash/.git ]; then
 fi
 sudo -u skydash bash -c 'cd /opt/skydash && npm ci --omit=dev --no-audit --no-fund --cache /tmp/skydash-npm-cache'
 
-for unit in skydash.service skydash-backup.service skydash-backup.timer; do
+for unit in skydash.service skydash-backup.service skydash-backup.timer skydash-update.service skydash-update.timer; do
   install -m 644 "/opt/skydash/deploy/$unit" "/etc/systemd/system/$unit"
 done
 systemctl daemon-reload
 systemctl enable skydash
-systemctl enable --now skydash-backup.timer
+systemctl enable --now skydash-backup.timer skydash-update.timer
 echo "Setup done. Next: create /opt/skydash/.env (owner skydash, mode 600), then: systemctl start skydash"
 echo "Backups need the rclone remotes r2 and skydash-crypt in /root/.config/rclone/rclone.conf (see docs/architecture.md)."

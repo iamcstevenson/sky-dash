@@ -1,0 +1,11 @@
+# Checks GitHub for new commits on main every 5 minutes, so a merge goes live by itself.
+[Unit]
+Description=Skydash auto-update check
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
