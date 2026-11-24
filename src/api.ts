@@ -19,7 +19,7 @@ import { discover, dismiss, audition, auditionList, refreshDiscover, discoverSta
 import { uploadLimits, jobStatus, videoEmbed } from './video.ts'
 import { groupedNotifications, unreadCounts, markSeen, profilesFor, recentChats, searchPeople, sendPostViaChat } from './notifs.ts'
 import { syncState, syncDay } from './sync.ts'
-import { listDrafts, getDraft, saveDraft, deleteDraft, dismissReplaced, startPosting, finishPosting, place } from './drafts.ts'
+import { listDrafts, getDraft, saveDraft, deleteDraft, dismissReplaced, startPosting, finishPosting, place, scheduleDraft, dueDrafts, failScheduled } from './drafts.ts'
 
 type Query = URLSearchParams
 type Handler = (q: Query, body: any) => Promise<unknown>
@@ -785,6 +785,8 @@ const routes: Record<string, Handler> = {
   // b: { id, slot, text, replyTo, media, baseUpdatedAt, editedAt, by }
   'POST /api/drafts/save': async (_q, b) => saveDraft(b),
   'POST /api/drafts/delete': async (_q, b) => deleteDraft(b),
+  // b: { id, postAt }: Post (in 2 minutes) and Schedule; postAt null takes it out of line
+  'POST /api/drafts/schedule': async (_q, b) => scheduleDraft(b),
   'POST /api/drafts/dismiss': async (_q, b) => {
     dismissReplaced(b.id)
     return { ok: true }
@@ -810,6 +812,41 @@ const routes: Record<string, Handler> = {
       finishPosting(id, by, uri)
     }
   },
+}
+
+// Posts drafts whose time has come (Post's 2-minute wait, or a scheduled time). Runs on the server, so
+// queued posts go out with no page open.
+let schedulerBusy = false
+async function postDue() {
+  if (schedulerBusy) return
+  schedulerBusy = true
+  try {
+    for (const id of dueDrafts()) {
+      let post
+      try {
+        post = await startPosting(id) // claims it, so a "Post now" at the same moment can't post it twice
+      } catch (err: any) {
+        if (err?.status !== 409) failScheduled(id, err?.message ?? String(err))
+        continue
+      }
+      let uri: string | null = null
+      try {
+        const res: any = await compose(post)
+        uri = res?.uri ?? null
+        console.log(`Posted queued draft ${id}${uri ? `: ${uri}` : ''}`)
+      } catch (err: any) {
+        console.error(`Queued draft ${id} failed: ${err?.message ?? err}`)
+        failScheduled(id, err?.message ?? String(err))
+      } finally {
+        finishPosting(id, 'mac', uri)
+      }
+    }
+  } finally {
+    schedulerBusy = false
+  }
+}
+export function startScheduler() {
+  setInterval(() => postDue().catch(() => {}), 10_000)
 }
 
 // New post, reply (replyTo) or quote (quote) from one of your accounts

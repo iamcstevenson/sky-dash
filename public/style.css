@@ -834,3 +834,9 @@ a.pc-btn:hover { text-decoration: none; border-color: var(--accent); }
 .ac-form label { display: grid; gap: 4px; }
 .ac-form input { font: inherit; padding: 6px 8px; }
 .ac-form .primary { justify-self: start; }
+
+/* Post in 2 minutes / Schedule */
+.compose-when { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.compose-when input { font: inherit; padding: 4px 6px; }
+.compose-hint { margin: 6px 0 0; font-size: .85em; }
+.draft-queued { border-left: 3px solid var(--accent); }
