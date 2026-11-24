@@ -151,11 +151,11 @@ function corpus(sinceMs: number, who: string, english = false): Row[] {
   const params: (string | number)[] = [sinceMs]
   let authorFilter = 'author_did IN (SELECT subject_did FROM follows)'
   const signedIn = accounts.filter((a) => a.ok && a.did)
-  if (who === 'both' && signedIn.length === 2) {
-    authorFilter = `author_did IN (SELECT subject_did FROM follows WHERE account_did IN (?, ?)
-      GROUP BY subject_did HAVING COUNT(*) = 2)`
-    params.push(signedIn[0].did!, signedIn[1].did!)
-  } else if (who === '1' || who === '2') {
+  if (who === 'both' && signedIn.length >= 2) {
+    authorFilter = `author_did IN (SELECT subject_did FROM follows WHERE account_did IN (${signedIn.map(() => '?').join(', ')})
+      GROUP BY subject_did HAVING COUNT(*) = ${signedIn.length})`
+    params.push(...signedIn.map((a) => a.did!))
+  } else if (/^[1-9]$/.test(who)) {
     const acct = signedIn.find((a) => a.slot === Number(who))
     if (acct) {
       authorFilter = 'author_did IN (SELECT subject_did FROM follows WHERE account_did = ?)'

@@ -11,6 +11,8 @@
   --repost: #17a35b;
   --acct-1: #1083fe;
   --acct-2: #b45cf0;
+  --acct-3: #0d9f6e;
+  --acct-4: #e07b00;
   --danger: #c62828;
   --radius: 12px;
   color-scheme: light;
@@ -29,6 +31,10 @@
     --repost: #3ccf7f;
     --acct-1: #3b9bff;
     --acct-2: #c88bff;
+  --acct-3: #34c98f;
+  --acct-4: #ffa53d;
+    --acct-3: #34c98f;
+    --acct-4: #ffa53d;
     --danger: #ff6b6b;
     color-scheme: dark;
   }
@@ -94,6 +100,8 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 }
 .acct-1 { --acct-color: var(--acct-1); }
 .acct-2 { --acct-color: var(--acct-2); }
+.acct-3 { --acct-color: var(--acct-3); }
+.acct-4 { --acct-color: var(--acct-4); }
 
 .tabs { display: flex; gap: 4px; padding: 8px 16px 0; max-width: 720px; margin: 0 auto; overflow-x: auto; }
 .tab { border: 0; background: none; padding: 8px 12px; border-bottom: 2px solid transparent; color: var(--muted); white-space: nowrap; }
