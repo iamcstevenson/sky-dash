@@ -29,7 +29,7 @@ Developed and run on macOS. It should work anywhere Node.js runs, but only macOS
    cp .env.example .env
    ```
 
-4. Edit `.env` and fill in each account's handle and an **app password**. Create one in Bluesky under Settings → Privacy and Security → App Passwords. Never use your real password. Turn on "Allow access to your direct messages" if you want Send via chat to work. With one account, leave the second account's lines as they are.
+4. Edit `.env` and fill in each account's handle and an **app password**. Create one in Bluesky under Settings → Privacy and Security → App Passwords. Never use your real password. Turn on "Allow access to your direct messages" if you want Send via chat to work. With one account, leave the second account's lines as they are. You can also leave them all empty and add accounts later in the dashboard (⚙ → Accounts, up to 4); that needs Skydash running in the background (launchd or systemd), because it restarts itself after an add or remove.
 5. Start it:
 
    ```bash
@@ -43,7 +43,7 @@ The first start reads the last 14 days of posts from everyone you follow, which 
 ## Privacy and security
 
 - **Your data stays on your computer.** Posts, stats and sign-in sessions are stored in `data/skydash.db`. Skydash only talks to Bluesky's own services, and there's no analytics or outside server.
-- **App passwords are stored unencrypted** in `.env`, and sign-in sessions in the database. Keep both private; `.gitignore` keeps them out of git. You can revoke an app password in Bluesky at any time.
+- **App passwords are stored unencrypted** in `.env` (or, for accounts added in the dashboard, in the database), and sign-in sessions in the database. Keep both private; `.gitignore` keeps them out of git. You can revoke an app password in Bluesky at any time.
 - **The dashboard has no login, and anyone who can reach it can post as you.** It only listens on your own computer (`127.0.0.1`) and refuses requests addressed to any other host name. Don't put it on the public internet. For phone access, use the private Tailscale setup below.
 - **The optional custom feed is public** by design, on its own port, and can't reach the dashboard.
 
@@ -210,7 +210,7 @@ Add your computer's Tailscale name to `.env`, for example `ALLOWED_HOSTS=my-mac.
 ## Troubleshooting
 
 - **The page won't load:** check that Skydash is running. If you use the background service, look in `~/Library/Logs/Skydash.log`.
-- **"Sign-in problem" on the page:** check the handle and app password in `.env`, then restart.
+- **"Sign-in problem" on the page:** for an account added in the dashboard, remove it under ⚙ → Accounts and add it again with a new app password; for one in `.env`, fix it there and restart.
 - **`EADDRINUSE` in the log:** the port is taken, usually by another copy of Skydash. Stop it first, or change `PORT` in `.env`.
 - **Send via chat says the password can't access messages:** create a new app password with direct messages allowed, and update `.env`.
 

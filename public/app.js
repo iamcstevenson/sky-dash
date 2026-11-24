@@ -4187,6 +4187,83 @@ function renderWho(follows) {
   el.innerHTML = opts.map(([v, label]) => `<button data-value="${v}" class="${state.who === v ? 'on' : ''}">${esc(label)}</button>`).join('')
 }
 
+// ---------- accounts (Settings) ----------
+
+let lastStatus = null
+
+function renderAccounts() {
+  const s = lastStatus
+  if (!s) return
+  $('#acList').innerHTML = s.accounts.length
+    ? `<ul class="ac-list">${s.accounts.map((a) => `<li>
+        ${badge(a.slot)} <b>@${esc(a.handle)}</b>
+        ${a.ok ? '' : `<span class="err">${esc(a.error ?? 'Not signed in')}</span>`}
+        ${a.source === 'dashboard'
+          ? `<button type="button" class="pc-btn" data-ac-remove="${a.slot}">Remove</button>`
+          : '<span class="dim" title="Set in the server settings file (.env)">server settings</span>'}
+      </li>`).join('')}</ul>`
+    : '<p class="dim">No accounts yet.</p>'
+  const full = s.configured >= (s.maxAccounts ?? 4)
+  $('#acForm').hidden = full
+  if (full) $('#acList').insertAdjacentHTML('beforeend', `<p class="dim">That's the most Skydash handles (${s.maxAccounts}). Remove one to add another.</p>`)
+}
+
+function openAccounts() {
+  $('#acError').textContent = ''
+  $('#acRestarting').hidden = true
+  renderAccounts()
+  $('#accountsDialog').showModal()
+}
+$('#accountsBtn').addEventListener('click', openAccounts)
+
+// After an add or remove the server restarts; wait for it to come back, then reload the page
+async function waitForRestart() {
+  $('#acForm').hidden = true
+  $('#acRestarting').hidden = false
+  await new Promise((r) => setTimeout(r, 4_000))
+  for (let i = 0; i < 40; i++) {
+    try {
+      await api('/api/status')
+      return location.reload()
+    } catch {
+      await new Promise((r) => setTimeout(r, 1_500))
+    }
+  }
+  $('#acRestarting').textContent = 'Skydash is taking a while to come back. Reload this page in a minute.'
+}
+
+$('#acForm').addEventListener('submit', async (e) => {
+  e.preventDefault()
+  const btn = $('#acAdd')
+  btn.disabled = true
+  $('#acError').textContent = ''
+  try {
+    await api('/api/accounts/add', { handle: $('#acHandle').value, appPassword: $('#acPassword').value })
+    $('#acPassword').value = ''
+    await waitForRestart()
+  } catch (err) {
+    $('#acError').textContent = err.message
+  } finally {
+    btn.disabled = false
+  }
+})
+
+$('#acList').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-ac-remove]')
+  if (!btn) return
+  const slot = Number(btn.dataset.acRemove)
+  const a = lastStatus?.accounts.find((x) => x.slot === slot)
+  if (!confirm(`Remove @${a?.handle ?? slot} from Skydash? Its posts stay on Bluesky; you can add it again later.`)) return
+  btn.disabled = true
+  try {
+    await api('/api/accounts/remove', { slot })
+    await waitForRestart()
+  } catch (err) {
+    btn.disabled = false
+    toast(err.message)
+  }
+})
+
 function renderSetup(s) {
   const el = $('#setup')
   const failed = s.accounts.filter((a) => !a.ok)
@@ -4194,15 +4271,16 @@ function renderSetup(s) {
   el.hidden = false
   el.innerHTML = s.configured === 0
     ? `<h2>Add your accounts</h2>
-       <p>Copy <code>.env.example</code> to <code>.env</code>, add an <b>app password</b> for each account
-       (Bluesky → Settings → Privacy and Security → App Passwords), then restart with <code>npm start</code>.</p>`
+       <p>Click <b>⚙</b> at the top right and add each account with an <b>app password</b>
+       (Bluesky → Settings → Privacy and Security → App Passwords).</p>`
     : `<h2>Sign-in problem</h2>${failed.map((a) => `<p class="err">@${esc(a.handle)}: ${esc(a.error)}</p>`).join('')}
-       <p>Check the handle and app password in <code>.env</code>, then restart.</p>`
+       <p>Open <b>⚙</b> at the top right to remove the account and add it again with a new app password.</p>`
 }
 
 async function refreshStatus() {
   try {
     const s = await api('/api/status')
+    lastStatus = s
     state.feedHours = s.feedHours
     const c = s.collector
     const b = s.backfill
@@ -4219,6 +4297,7 @@ async function refreshStatus() {
 async function init() {
   const s = await refreshStatus()
   if (!s) return
+  lastStatus = s
   state.accounts = s.accounts.filter((a) => a.ok)
   if (!state.accounts.some((a) => a.slot === state.actAs)) state.actAs = state.accounts[0]?.slot ?? 1
   renderSetup(s)
