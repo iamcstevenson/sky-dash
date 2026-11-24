@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Updates the server to the latest main and restarts Skydash. Run as root on the server,
-# or from the Mac: ssh skydash /opt/skydash/deploy/deploy.sh
+# Updates the server to the latest main and restarts Skydash. Runs by itself within 5 minutes of
+# a change to main (skydash-update.timer); by hand: as root on the server, or ssh skydash /opt/skydash/deploy/deploy.sh
 set -euo pipefail
 cd /opt/skydash
 
@@ -10,7 +10,7 @@ after=$(sudo -u skydash git rev-parse --short HEAD)
 sudo -u skydash npm ci --omit=dev --no-audit --no-fund --cache /tmp/skydash-npm-cache --silent
 
 changed=0
-for unit in skydash.service skydash-backup.service skydash-backup.timer; do
+for unit in skydash.service skydash-backup.service skydash-backup.timer skydash-update.service skydash-update.timer; do
   if ! cmp -s "deploy/$unit" "/etc/systemd/system/$unit"; then
     install -m 644 "deploy/$unit" "/etc/systemd/system/$unit"
     changed=1
@@ -18,7 +18,7 @@ for unit in skydash.service skydash-backup.service skydash-backup.timer; do
 done
 if [ "$changed" = 1 ]; then
   systemctl daemon-reload
-  systemctl enable --now --quiet skydash-backup.timer
+  systemctl enable --now --quiet skydash-backup.timer skydash-update.timer
 fi
 systemctl restart skydash
 sleep 5

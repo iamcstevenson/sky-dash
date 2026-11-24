@@ -1,0 +1,9 @@
+# Runs deploy/auto-update.sh once. Started every 5 minutes by skydash-update.timer.
+[Unit]
+Description=Skydash: deploy new commits from GitHub main
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/skydash/deploy/auto-update.sh
