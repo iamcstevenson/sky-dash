@@ -1,7 +1,7 @@
 'use strict'
 
 const $ = (sel, root = document) => root.querySelector(sel)
-const LETTERS = { 1: 'A', 2: 'B' }
+const LETTERS = { 1: 'A', 2: 'B', 3: 'C', 4: 'D' }
 
 const state = {
   accounts: [], // signed-in accounts: { slot, handle, did }
@@ -62,6 +62,11 @@ function esc(s) {
 function acctName(slot) {
   const a = state.accounts.find((x) => x.slot === Number(slot))
   return a ? `@${a.handle}` : `account ${LETTERS[slot] ?? slot}`
+}
+
+// "Followed by every account": "Both" with two accounts, "All 3" with three
+function allLabel() {
+  return state.accounts.length === 2 ? 'Both' : `All ${state.accounts.length}`
 }
 
 function badge(slot, title) {
@@ -1040,7 +1045,7 @@ function renderTrendControls() {
   who.hidden = state.accounts.length < 2
   const opts = [['all', 'Everyone']]
   for (const a of state.accounts) opts.push([String(a.slot), `${LETTERS[a.slot]} follows`])
-  if (state.accounts.length === 2) opts.push(['both', 'Both'])
+  if (state.accounts.length >= 2) opts.push(['both', allLabel()])
   who.innerHTML = opts.map(([v, l]) => `<button data-value="${v}" class="${tr.who === v ? 'on' : ''}">${esc(l)}</button>`).join('')
 }
 
@@ -1438,12 +1443,13 @@ function renderOverlap() {
     if (!['all', 'new', 'mine'].includes(fv.overlap)) fv.overlap = 'all'
     opts.push(['new', `New to me ${n(isNewToMe)}`])
     opts.push(['mine', `You follow ${n((r) => r.followedBy.length > 0)}`])
-  } else if (state.accounts.length === 2) {
+  } else if (state.accounts.length >= 2) {
     if (['new', 'mine'].includes(fv.overlap)) fv.overlap = 'all'
-    const [a, b] = state.accounts.map((x) => x.slot)
-    opts.push(['both', `Both ${n((r) => r.followedBy.length === 2)}`])
-    opts.push([`only${a}`, `${LETTERS[a]} only ${n((r) => r.followedBy.length === 1 && r.followedBy[0] === a)}`])
-    opts.push([`only${b}`, `${LETTERS[b]} only ${n((r) => r.followedBy.length === 1 && r.followedBy[0] === b)}`])
+    const all = state.accounts.length
+    opts.push(['both', `${allLabel()} ${n((r) => r.followedBy.length === all)}`])
+    for (const { slot } of state.accounts) {
+      opts.push([`only${slot}`, `${LETTERS[slot]} only ${n((r) => r.followedBy.length === 1 && r.followedBy[0] === slot)}`])
+    }
   }
   $('#fvOverlap').innerHTML = opts.map(([v, l]) => `<button data-value="${v}" class="${fv.overlap === v ? 'on' : ''}">${esc(l)}</button>`).join('')
 }
@@ -1454,7 +1460,7 @@ function filteredFollows() {
   return fv.rows.filter((r) => {
     if (fv.overlap === 'new' && !isNewToMe(r)) return false
     if (fv.overlap === 'mine' && !r.followedBy.length) return false
-    if (fv.overlap === 'both' && r.followedBy.length !== 2) return false
+    if (fv.overlap === 'both' && r.followedBy.length !== state.accounts.length) return false
     if (fv.overlap.startsWith('only') && !(r.followedBy.length === 1 && r.followedBy[0] === Number(fv.overlap.slice(4)))) return false
     if (q && !`${r.handle ?? ''} ${r.displayName ?? ''}`.toLowerCase().includes(q)) return false
     if (fv.quick.has('quiet') && r.lastActiveMs > quietMs) return false
@@ -4174,10 +4180,9 @@ $('#actAs').addEventListener('click', (e) => {
 
 function renderWho(follows) {
   const el = $('#whoFilter')
-  const two = state.accounts.length === 2
   const opts = [['all', 'Everyone']]
   for (const a of state.accounts) opts.push([String(a.slot), `${LETTERS[a.slot]} follows`])
-  if (two) opts.push(['both', `Both${follows ? ` (${follows.both})` : ''}`])
+  if (state.accounts.length >= 2) opts.push(['both', `${allLabel()}${follows ? ` (${follows.both})` : ''}`])
   el.hidden = state.accounts.length < 2
   el.innerHTML = opts.map(([v, label]) => `<button data-value="${v}" class="${state.who === v ? 'on' : ''}">${esc(label)}</button>`).join('')
 }

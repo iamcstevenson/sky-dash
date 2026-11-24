@@ -171,18 +171,21 @@ export function followedDids(): string[] {
 }
 
 export function followCounts() {
-  const [a, b] = accounts.filter((x) => x.did)
-  if (!a) return null
-  const count = (sql: string, ...params: string[]) => (db.prepare(sql).get(...params) as { n: number }).n
-  if (!b) return { only1: count('SELECT COUNT(*) n FROM follows WHERE account_did = ?', a.did!), only2: 0, both: 0 }
-  const both = count(
-    'SELECT COUNT(*) n FROM follows f1 JOIN follows f2 ON f1.subject_did = f2.subject_did WHERE f1.account_did = ? AND f2.account_did = ?',
-    a.did!,
-    b.did!,
-  )
-  return {
-    [`only${a.slot}`]: count('SELECT COUNT(*) n FROM follows WHERE account_did = ?', a.did!) - both,
-    [`only${b.slot}`]: count('SELECT COUNT(*) n FROM follows WHERE account_did = ?', b.did!) - both,
-    both,
+  // only<slot>: followed by that account and no other; both: followed by every signed-in account
+  const signed = accounts.filter((x) => x.did)
+  if (!signed.length) return null
+  const rows = db
+    .prepare(`SELECT subject_did, GROUP_CONCAT(account_did) accts FROM follows WHERE account_did IN (${signed.map(() => '?').join(', ')}) GROUP BY subject_did`)
+    .all(...signed.map((a) => a.did!)) as { accts: string }[]
+  const out: Record<string, number> = { both: 0 }
+  for (const a of signed) out[`only${a.slot}`] = 0
+  for (const r of rows) {
+    const dids = r.accts.split(',')
+    if (signed.length > 1 && dids.length === signed.length) out.both++
+    if (dids.length === 1) {
+      const a = signed.find((x) => x.did === dids[0])
+      if (a) out[`only${a.slot}`]++
+    }
   }
+  return out
 }

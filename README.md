@@ -1,10 +1,10 @@
 # Skydash
 
-A free, self-hosted dashboard for one or two Bluesky accounts. It runs on your own computer, and your data stays there.
+A free, self-hosted dashboard for one to four Bluesky accounts. It runs on your own computer, and your data stays there.
 
 **What it does**
 
-- **Following:** one feed for both accounts, with replies shown in context.
+- **Following:** one feed for all your accounts, with replies shown in context.
 - **Notifications:** grouped notifications, modeled on Bluesky's new notifications beta.
 - **Keywords:** feeds of public posts from anyone, with rules that pin down what a keyword means ("cardinals" = the St. Louis Cardinals).
 - **Follows:** 14-day stats for everyone you follow, with bulk unfollow, mute and move-to-list.
@@ -161,7 +161,7 @@ Click a column to sort. Quick filters can be combined: Quiet 14+ days, At most N
 
 Select rows to act on them. Each action shows who's affected and from which account, and waits for you to confirm:
 
-- **Unfollow** from either or both accounts, with Undo for 10 seconds.
+- **Unfollow** from any or all of your accounts, with Undo for 10 seconds.
 - **Move to list:** add them to one of your lists or a new one, and optionally unfollow.
 - **Mute** from either account, with Undo. They aren't told.
 - **Follow from…** to copy follows between your accounts.

@@ -59,11 +59,12 @@ function feedFilter(q: Query) {
 
   const who = q.get('who') ?? 'all'
   const signedIn = accounts.filter((a) => a.ok && a.did)
-  if (who === 'both' && signedIn.length === 2) {
-    where.push(`p.author_did IN (SELECT subject_did FROM follows WHERE account_did IN (?, ?)
-      GROUP BY subject_did HAVING COUNT(*) = 2)`)
-    params.push(signedIn[0].did!, signedIn[1].did!)
-  } else if (who === '1' || who === '2') {
+  if (who === 'both' && signedIn.length >= 2) {
+    // "both" = followed by every signed-in account
+    where.push(`p.author_did IN (SELECT subject_did FROM follows WHERE account_did IN (${signedIn.map(() => '?').join(', ')})
+      GROUP BY subject_did HAVING COUNT(*) = ${signedIn.length})`)
+    params.push(...signedIn.map((a) => a.did!))
+  } else if (/^[1-9]$/.test(who)) {
     where.push('p.author_did IN (SELECT subject_did FROM follows WHERE account_did = ?)')
     params.push(account(who).did!)
   } else {

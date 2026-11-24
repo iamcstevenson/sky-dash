@@ -22,7 +22,7 @@ function readAccount(slot: number): AccountConfig | null {
 }
 
 export const config = {
-  accounts: [readAccount(1), readAccount(2)].filter((a): a is AccountConfig => a !== null),
+  accounts: [1, 2, 3, 4].map(readAccount).filter((a): a is AccountConfig => a !== null),
   port: Number(env.PORT) || 4747,
   host: env.HOST || '127.0.0.1',
   feedHours: Number(env.FEED_HOURS) || 72,
