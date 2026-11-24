@@ -3,8 +3,9 @@
 Description=Skydash auto-update check
 
 [Timer]
-OnBootSec=2min
-OnUnitActiveSec=5min
+# A fixed clock schedule: a boot-relative one (OnBootSec) never fired on a server that had
+# booted long before the timer was installed.
+OnCalendar=*:0/5
 Persistent=true
 
 [Install]

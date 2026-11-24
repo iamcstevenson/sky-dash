@@ -4287,6 +4287,7 @@ async function refreshStatus() {
     let text = c.connected ? `Live · ${s.storedPosts.toLocaleString()} posts stored` : (c.error || 'Connecting…')
     if (b.running) text += ` · catching up ${b.done}/${b.total}`
     $('#status').innerHTML = `<span class="dot ${c.connected ? 'live' : 'down'}"></span><span class="status-text">${esc(text)}</span>`
+    $('#status').title = s.version ? `Collector status · code version ${s.version}` : 'Collector status'
     return s
   } catch {
     $('#status').innerHTML = '<span class="dot down"></span><span class="status-text">Dashboard server is not running</span>'
