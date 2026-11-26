@@ -1409,7 +1409,7 @@ function panelHeader(p) {
   return `<div class="sp-head">
       <img class="pc-avatar" src="${esc(p.avatar ?? '')}" alt="">
       <div><b>${esc(p.displayName || p.handle)}</b><div class="dim">@${esc(p.handle)}</div>
-        ${followsYou.length ? `<div class="pc-tags">${followsYou.map((a) => `<span class="pc-tag">Follows ${badge(a.slot)}</span>`).join('')}</div>` : ''}</div>
+        <div class="pc-tags">${followsYouTag(followsYou.map((a) => a.slot))}</div></div>
     </div>
     ${p.description ? `<div class="pc-bio">${linkify(p.description)}</div>` : ''}
     <div class="pc-counts"><span><b>${fmtCount(p.followersCount)}</b> followers</span><span><b>${fmtCount(p.followsCount)}</b> following</span><span><b>${fmtCount(p.postsCount)}</b> posts</span>${p.createdAt ? `<span class="dim">joined ${new Date(p.createdAt).toLocaleDateString([], { month: 'short', year: 'numeric' })}</span>` : ''}</div>
@@ -3762,6 +3762,14 @@ function fmtCount(n) {
   return n >= 10_000 ? `${(n / 1000).toFixed(n >= 100_000 ? 0 : 1)}k` : n.toLocaleString()
 }
 
+// Whether they follow you, at a glance: which of your accounts they follow, or that they follow none.
+// (Who you follow is already on the Follow / Unfollow buttons.)
+function followsYouTag(slots) {
+  return slots.length
+    ? `<span class="pc-tag follows-you">Follows you ${slots.map((s) => badge(s, `Follows ${acctName(s)}`)).join('')}</span>`
+    : `<span class="pc-tag not-following-you">Doesn't follow you</span>`
+}
+
 function renderProfileCard(p) {
   const rel = p.relationship
   const slots = state.accounts.map((a) => a.slot)
@@ -3790,8 +3798,7 @@ function renderProfileCard(p) {
         <span class="dim">@${esc(p.handle)}</span>
         <div class="pc-tags">
           ${isSelf ? '<span class="pc-tag">This is you</span>' : ''}
-          ${followsYou.map((s) => `<span class="pc-tag">Follows ${badge(s)}</span>`).join('')}
-          ${following.length ? `<span class="pc-tag">You follow from ${following.map((s) => badge(s)).join('')}</span>` : ''}
+          ${isSelf ? '' : followsYouTag(followsYou)}
           ${muted ? '<span class="pc-tag">Muted</span>' : ''}
         </div>
       </div>
