@@ -87,7 +87,7 @@ The **Act as** buttons at the top choose which account likes, reposts, replies, 
 ### On every post
 
 - **Double-action warning:** if your other account already liked or reposted a post, Skydash asks before doing it again.
-- **Profile cards:** hover over a name or avatar on any tab, or tap it on a phone, to see their bio, follower counts, your 14-day stats on them, and whether they follow each of your accounts. From the card you can **Unfollow** or **Follow** from either account (with Undo), **Mute**, see **Their posts**, or open them in Bluesky.
+- **Profile cards:** hover over a name or avatar on any tab, or tap it on a phone, to see their bio, follower counts, your 14-day stats on them, and whether they follow you: **Follows you** with the accounts they follow, or **Doesn't follow you**. From the card you can **Unfollow** or **Follow** from either account (with Undo), **Mute**, see **Their posts**, or open them in Bluesky.
 - **Share:** the arrow opens the same menu as bsky.app: **Copy link to post**, **Send via chat** (pick a recent chat or search for someone, and add a message if you like), and **Embed post** on wide screens, with a System, Light or Dark option. Posts whose authors hide them from logged-out viewers only offer Send via chat, with a note explaining why.
 - **Videos** play in place when you click them; **⤢** opens a large viewer. Only one plays at a time.
 - **English only** (on by default) hides posts in other languages in Following, Keywords and Trending. Posts go by their language label. For those with no label, Skydash looks at the text and keeps the post when unsure.

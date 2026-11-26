@@ -377,6 +377,8 @@ body.wide main, body.wide .tabs { max-width: 1320px; }
 .pc-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .pc-tag { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; padding: 1px 8px; border-radius: 999px; background: var(--surface-2); color: var(--muted); }
 .pc-tag .acct-badge { min-width: 14px; height: 14px; font-size: 9px; }
+.pc-tag.follows-you { background: rgb(16 159 110 / .18); color: #13a374; font-weight: 600; }
+.pc-tag.not-following-you { border: 1px dashed var(--border); background: none; }
 .pc-bio { margin: 10px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 7.5em; overflow: hidden; }
 .pc-counts { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; color: var(--muted); }
 .pc-counts b { color: var(--text); }
