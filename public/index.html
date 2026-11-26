@@ -31,6 +31,20 @@
   </nav>
 
   <main>
+    <aside id="mutedBox" class="muted-box" aria-label="Muted words" hidden>
+      <button type="button" class="mb-head" id="mbToggle" aria-expanded="false" aria-controls="mbBody">
+        <span>🔇 Muted words <span id="mbCount" class="dim"></span></span><span class="mb-caret" aria-hidden="true">▾</span>
+      </button>
+      <div class="mb-body" id="mbBody" hidden>
+        <form id="mbForm" class="mb-form">
+          <input id="mbInput" placeholder="Word, phrase or #tag" maxlength="100" autocomplete="off" aria-label="Word or phrase to mute">
+          <button type="submit" class="secondary">Mute</button>
+        </form>
+        <ul id="mbList" class="mb-list"></ul>
+        <p class="dim mb-note">Posts containing these are hidden from Following, Keywords, Lists and Trending. Whole words only, capitals don't matter, and #tags count.</p>
+      </div>
+    </aside>
+
     <section id="setup" class="setup" hidden></section>
 
     <section id="kwPanel" class="kw-panel" hidden>

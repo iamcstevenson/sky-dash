@@ -884,3 +884,28 @@ a.pc-btn:hover { text-decoration: none; border-color: var(--accent); }
 @media (max-width: 640px) { .side-panel { width: 100vw; border-left: 0; } }
 /* Wide screens: move the page over so the panel doesn't cover the list */
 @media (min-width: 1200px) { body.panel-open main, body.panel-open .tabs, body.panel-open #filters { margin-right: 500px; } }
+
+/* Follow pills: a badge for each of your accounts that follows someone; click to unfollow / follow */
+.follow-pill { border: 0; background: none; padding: 0; margin: 0; cursor: pointer; display: inline-flex; align-items: center; gap: 3px; color: inherit; font: inherit; }
+.follow-pill.pc-tag { padding: 1px 8px; background: var(--surface-2); color: var(--muted); }
+.follow-pill:not(.on) { opacity: .5; filter: grayscale(1); }
+.follow-pill:hover { filter: brightness(1.15); }
+.follow-pill:not(.on):hover { opacity: .9; filter: none; }
+
+/* Muted words: a box on the left on wide screens; a collapsed bar above the feed on narrow ones */
+.muted-box { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); margin-bottom: 10px; }
+.mb-head { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 8px; border: 0; background: none; padding: 8px 12px; font: inherit; font-weight: 600; color: var(--text); cursor: pointer; }
+.mb-caret { transition: transform .15s; }
+.muted-box:not(.open) .mb-caret { transform: rotate(-90deg); }
+.mb-body { padding: 0 12px 10px; }
+.mb-form { display: flex; gap: 6px; }
+.mb-form input { flex: 1; min-width: 0; font: inherit; padding: 5px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); }
+.mb-list { list-style: none; margin: 8px 0 0; padding: 0; max-height: 50vh; overflow-y: auto; }
+.mb-list li { display: flex; align-items: center; gap: 6px; padding: 3px 0; border-bottom: 1px solid var(--border); }
+.mb-list li:last-child { border-bottom: 0; }
+.mb-word { flex: 1; overflow-wrap: anywhere; }
+.mb-list .icon-btn { padding: 0 6px; }
+.mb-note { font-size: .8em; margin: 8px 0 0; }
+@media (min-width: 1280px) {
+  .muted-box { position: fixed; left: 16px; top: 120px; width: 240px; max-height: calc(100vh - 140px); overflow-y: auto; margin: 0; z-index: 4; }
+}
