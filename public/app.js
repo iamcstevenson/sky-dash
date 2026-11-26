@@ -137,9 +137,14 @@ function renderMedia(embed, blur, post) {
         ${e.thumb ? `<img loading="lazy" src="${esc(e.thumb)}" alt="">` : ''}
         <div><b>${esc(e.title || e.uri)}</b><small>${esc(e.description)}</small><small>${esc(host)}</small></div></a>`
     }
-    case 'app.bsky.embed.video#view':
-      return `<a class="video" href="${esc(post ? postUrl(post) : '#')}" target="_blank" rel="noopener" title="Play on bsky.app">
-        ${embed.thumbnail ? `<img loading="lazy" src="${esc(embed.thumbnail)}" alt="${esc(embed.alt)}" class="${blur ? 'blurred' : ''}">` : 'Video'}<span>▶</span></a>`
+    case 'app.bsky.embed.video#view': {
+      // Plays here (see "video player"); the time link on the post still opens it on bsky.app
+      const ar = embed.aspectRatio?.width && embed.aspectRatio?.height ? `${embed.aspectRatio.width} / ${embed.aspectRatio.height}` : '16 / 9'
+      return `<div class="video" data-video="${esc(embed.playlist)}" data-alt="${esc(embed.alt ?? '')}" style="--ar: ${ar}">
+        ${embed.thumbnail ? `<img loading="lazy" src="${esc(embed.thumbnail)}" alt="${esc(embed.alt ?? '')}" class="${blur ? 'blurred' : ''}">` : '<div class="video-blank"></div>'}
+        <button type="button" class="video-play" aria-label="Play video">▶</button>
+        <button type="button" class="video-expand" aria-label="Play in a large viewer" title="Large viewer">⤢</button></div>`
+    }
     default:
       return ''
   }
@@ -1283,17 +1288,22 @@ $('#dvRefresh').addEventListener('click', async () => {
   loadDiscover()
 })
 
-$('#discoverView').addEventListener('click', async (e) => {
+$('#discoverView').addEventListener('click', (e) => {
   const b = e.target.closest('[data-dv]')
-  if (!b) return
+  if (b) discoverAction(b)
+})
+
+// Follow, Audition, Not interested… from a Discover row or the side panel
+async function discoverAction(b) {
   const did = b.dataset.did
   const handle = b.dataset.handle
-  const removeRow = () => b.closest('.dv-row')?.remove()
+  const removeRow = () => document.querySelector(`#discoverView .dv-row[data-did="${CSS.escape(did)}"]`)?.remove()
+  const inPanel = !!b.closest('#profilePanel')
   b.disabled = true
   try {
     switch (b.dataset.dv) {
       case 'posts':
-        return showAuthor(did, handle ?? did)
+        return openProfilePanel(did)
       case 'follow': {
         const slot = Number(b.dataset.slot)
         const res = await api('/api/follows/follow', { dids: [did], slots: [slot] })
@@ -1303,19 +1313,24 @@ $('#discoverView').addEventListener('click', async (e) => {
           run: async () => {
             await api('/api/follows/unfollow', { dids: [did], slots: [slot] })
             loadDiscover()
+            if (sp.did === did) renderPanel()
           },
         })
+        if (inPanel) renderPanel(true)
         return loadDiscover()
       }
       case 'audition':
         await api('/api/discover/audition', { did, start: true })
         toast(`Auditioning @${handle}: their posts will be collected without following`)
+        if (inPanel) b.replaceWith(Object.assign(document.createElement('span'), { className: 'dim', textContent: 'Auditioning' }))
         return loadDiscover()
       case 'unaudition':
         await api('/api/discover/audition', { did, start: false })
         return loadDiscover()
       case 'dismiss':
         await api('/api/discover/dismiss', { did })
+        // In the panel, move on to the next person (the list is read before this row goes)
+        if (inPanel) panelStep(1, true)
         removeRow()
         toast(`Won't suggest @${handle} again`, {
           label: 'Undo',
@@ -1331,7 +1346,282 @@ $('#discoverView').addEventListener('click', async (e) => {
   } finally {
     b.disabled = false
   }
+}
+
+// ---------- profile side panel (Discover's "Their posts") ----------
+// A snapshot of someone from their last 100 posts, plus their recent posts, without leaving your place.
+// ← / → step through the Discover list; Esc closes.
+
+const sp = { did: null, list: [], replies: false, shown: 5, snap: null, profile: null }
+
+function panelList() {
+  return [...new Set([...document.querySelectorAll('#discoverView [data-dv="posts"]')].map((b) => b.dataset.did))]
+}
+
+function openProfilePanel(did) {
+  sp.list = state.view === 'discover' ? panelList() : []
+  showPanelFor(did)
+}
+
+function showPanelFor(did) {
+  sp.did = did
+  sp.shown = 5
+  sp.snap = null
+  sp.profile = null
+  $('#profilePanel').hidden = false
+  document.body.classList.add('panel-open')
+  document.querySelectorAll('.dv-row.dv-current').forEach((r) => r.classList.remove('dv-current'))
+  const row = document.querySelector(`#discoverView .dv-row[data-did="${CSS.escape(did)}"]`)
+  row?.classList.add('dv-current')
+  row?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  const i = sp.list.indexOf(did)
+  $('#spPos').textContent = i >= 0 ? `${i + 1} of ${sp.list.length}` : ''
+  $('#spPrev').disabled = i <= 0
+  $('#spNext').disabled = i < 0 || i >= sp.list.length - 1
+  $('#spBody').innerHTML = '<p class="dim">Reading their last 100 posts…</p>'
+  $('#spBody').scrollTop = 0
+  renderPanel(true)
+}
+
+// fresh: read the profile again (after a follow); the snapshot is cached on the server for 10 minutes
+async function renderPanel(fresh = false) {
+  const did = sp.did
+  try {
+    const [profile, snap] = await Promise.all([fetchProfile(did, fresh), sp.snap ? Promise.resolve(sp.snap) : api(`/api/snapshot?actor=${encodeURIComponent(did)}`)])
+    if (sp.did !== did) return
+    sp.profile = profile
+    sp.snap = snap
+    $('#spBody').innerHTML = panelHeader(profile) + panelSnapshot(snap) + panelPosts(snap)
+  } catch (err) {
+    if (sp.did === did) $('#spBody').innerHTML = `<p class="error">Couldn't load this profile: ${esc(err.message)}</p>`
+  }
+}
+
+function panelHeader(p) {
+  const rel = p.relationship ?? {}
+  const following = state.accounts.filter((a) => rel[a.slot]?.following)
+  const follows = state.accounts.map((a) => rel[a.slot]?.following
+    ? `<span class="pc-tag">${badge(a.slot)} following</span>`
+    : `<button class="pc-btn follow" data-dv="follow" data-slot="${a.slot}" data-did="${esc(p.did)}">${badge(a.slot)} Follow</button>`).join('')
+  const inDiscover = !!document.querySelector(`#discoverView .dv-row[data-did="${CSS.escape(p.did)}"]`)
+  const auditioning = !!document.querySelector(`#dvAuditions .dv-row[data-did="${CSS.escape(p.did)}"]`)
+  const followsYou = state.accounts.filter((a) => rel[a.slot]?.followedBy)
+  return `<div class="sp-head">
+      <img class="pc-avatar" src="${esc(p.avatar ?? '')}" alt="">
+      <div><b>${esc(p.displayName || p.handle)}</b><div class="dim">@${esc(p.handle)}</div>
+        ${followsYou.length ? `<div class="pc-tags">${followsYou.map((a) => `<span class="pc-tag">Follows ${badge(a.slot)}</span>`).join('')}</div>` : ''}</div>
+    </div>
+    ${p.description ? `<div class="pc-bio">${linkify(p.description)}</div>` : ''}
+    <div class="pc-counts"><span><b>${fmtCount(p.followersCount)}</b> followers</span><span><b>${fmtCount(p.followsCount)}</b> following</span><span><b>${fmtCount(p.postsCount)}</b> posts</span>${p.createdAt ? `<span class="dim">joined ${new Date(p.createdAt).toLocaleDateString([], { month: 'short', year: 'numeric' })}</span>` : ''}</div>
+    <div class="pc-actions">
+      ${follows}
+      ${inDiscover && !auditioning && !following.length ? `<button class="pc-btn" data-dv="audition" data-did="${esc(p.did)}" data-handle="${esc(p.handle)}" title="Collect their posts for a while without following">Audition</button>` : ''}
+      ${inDiscover && !auditioning ? `<button class="link-btn" data-dv="dismiss" data-did="${esc(p.did)}" data-handle="${esc(p.handle)}">Not interested</button>` : ''}
+      ${following.length ? `<button class="pc-btn" data-sp="following" title="Their posts in your Following feed">In Following ›</button>` : ''}
+      <a class="pc-btn" href="https://bsky.app/profile/${esc(p.handle)}" target="_blank" rel="noopener">Bluesky ↗</a>
+    </div>`
+}
+
+function panelSnapshot(s) {
+  if (!s.count) return '<div class="sp-section"><p class="dim">No posts yet.</p></div>'
+  const total = s.mix.posts + s.mix.replies + s.mix.quotes + s.mix.reposts || 1
+  const pct = (n) => Math.round((n / total) * 100)
+  const parts = [['own', 'Own posts', s.mix.posts], ['reply', 'Replies', s.mix.replies], ['quote', 'Quotes', s.mix.quotes], ['repost', 'Reposts', s.mix.reposts]]
+  const top = parts.slice().sort((a, b) => b[2] - a[2])[0]
+  const style = { own: 'mostly writes their own posts', reply: 'mostly talks in replies', quote: 'mostly quote-posts others', repost: 'mostly reposts others' }[top[0]]
+  // Active hours, in your time zone
+  const hours = new Array(24).fill(0)
+  for (const t of s.times) hours[new Date(t).getHours()]++
+  const peak = Math.max(...hours, 1)
+  const best = hours.indexOf(peak)
+  const hourName = (h) => new Date(2000, 0, 1, h).toLocaleTimeString([], { hour: 'numeric' })
+  const maxTopic = Math.max(...s.topics.map((t) => t.count), 1)
+  return `<div class="sp-section">
+      <h4>What they post about</h4>
+      ${s.topics.length
+        ? `<div class="sp-topics">${s.topics.map((t) => `<span class="sp-topic ${t.kind}" style="font-size:${(0.85 + 0.65 * (t.count / maxTopic)).toFixed(2)}em" title="In ${t.count} posts">${esc(t.label)}</span>`).join('')}</div>`
+        : '<p class="dim">No repeated topics in their recent posts.</p>'}
+    </div>
+    <div class="sp-section">
+      <h4>Kind of poster <small class="dim">· ${esc(style)}</small></h4>
+      <div class="sp-mix">${parts.filter((p) => p[2]).map(([k, l, n]) => `<span class="mix-${k}" style="flex:${n}" title="${l}: ${n} (${pct(n)}%)"></span>`).join('')}</div>
+      <div class="sp-legend">${parts.filter((p) => p[2]).map(([k, l, n]) => `<span><i class="mix-${k}"></i>${l} ${pct(n)}%</span>`).join('')}</div>
+      <div class="dim">${s.mediaShare}% of their own posts have photos or video</div>
+    </div>
+    <div class="sp-section">
+      <h4>How often</h4>
+      <div>About <b>${s.perDay}</b> a day <span class="dim">(last ${s.count} posts over ${s.days} days)</span>${s.perDay >= 20 ? ' <span class="kw-tag hidden-tag">busy</span>' : ''}</div>
+      <div class="sp-hours" title="When they post, in your time zone">${hours.map((n, h) => `<span style="height:${Math.round((n / peak) * 100)}%" title="${hourName(h)}: ${n}"></span>`).join('')}</div>
+      <div class="sp-hours-axis dim"><span>12 AM</span><span>6 AM</span><span>12 PM</span><span>6 PM</span><span></span></div>
+      <div class="dim">Busiest around ${hourName(best)}</div>
+    </div>
+    ${s.reception ? `<div class="sp-section"><h4>How their posts land</h4><div>Per post, on average: <b>${s.reception.likes}</b> likes · <b>${s.reception.replies}</b> replies · <b>${s.reception.reposts}</b> reposts</div></div>` : ''}
+    ${s.domains.length ? `<div class="sp-section"><h4>Sites they link</h4><div class="sp-topics">${s.domains.map((d) => `<span class="sp-topic link">${esc(d.host)} <small class="dim">${d.count}</small></span>`).join('')}</div></div>` : ''}
+    ${s.talksWith.length ? `<div class="sp-section"><h4>Who they talk with</h4><div class="sp-people">${s.talksWith.map((p) => `<button class="sp-person" data-profile="${esc(p.did)}">
+        <img class="avatar" src="${esc(p.avatar ?? '')}" alt=""><span><b>${esc(p.displayName || p.handle)}</b>
+        <small class="dim">${[p.replies ? `${p.replies} repl${p.replies === 1 ? 'y' : 'ies'}` : '', p.reposts ? `${p.reposts} repost${p.reposts === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')}${p.you ? ' · <b>you</b>' : p.followed ? ' · you follow' : ''}</small></span></button>`).join('')}</div></div>` : ''}`
+}
+
+function panelPosts(s) {
+  const list = s.posts.filter((p) => sp.replies || p.kind !== 'reply')
+  const shown = list.slice(0, sp.shown)
+  return `<div class="sp-section">
+      <h4>Recent posts</h4>
+      <div class="seg sp-seg"><button data-sp="originals" class="${sp.replies ? '' : 'on'}">Posts</button><button data-sp="replies" class="${sp.replies ? 'on' : ''}">Posts &amp; replies</button></div>
+      ${shown.length ? shown.map((p) => `<div class="card sp-post" data-open-thread="${esc(p.post.uri)}">${p.kind === 'reply' ? `<div class="dim sp-replyto">↩ Replying to @${esc(p.replyTo ?? 'someone')}</div>` : ''}${renderPost(p.post)}</div>`).join('')
+        : '<p class="dim">Nothing here in their last 100.</p>'}
+      ${list.length > sp.shown ? '<button class="link-btn" data-sp="more">Show 5 more</button>' : ''}
+    </div>`
+}
+
+function panelStep(dir, afterRemove = false) {
+  const i = sp.list.indexOf(sp.did)
+  const next = sp.list[i + dir]
+  if (afterRemove) sp.list.splice(i, 1)
+  if (next) showPanelFor(next)
+  else if (afterRemove) closePanel()
+}
+
+function closePanel() {
+  $('#profilePanel').hidden = true
+  document.body.classList.remove('panel-open')
+  sp.did = null
+  document.querySelectorAll('.dv-row.dv-current').forEach((r) => r.classList.remove('dv-current'))
+}
+
+$('#spPrev').addEventListener('click', () => panelStep(-1))
+$('#spNext').addEventListener('click', () => panelStep(1))
+$('#spClose').addEventListener('click', closePanel)
+$('#profilePanel').addEventListener('click', (e) => {
+  const dvBtn = e.target.closest('[data-dv]')
+  if (dvBtn) return discoverAction(dvBtn)
+  const b = e.target.closest('[data-sp]')
+  if (!b) return
+  if (b.dataset.sp === 'originals' || b.dataset.sp === 'replies') {
+    sp.replies = b.dataset.sp === 'replies'
+    sp.shown = 5
+  } else if (b.dataset.sp === 'more') {
+    sp.shown += 5
+  } else if (b.dataset.sp === 'following') {
+    const p = sp.profile
+    closePanel()
+    return showAuthor(p.did, p.handle)
+  }
+  const section = $('#spBody .sp-section:last-child')
+  if (section && sp.snap) section.outerHTML = panelPosts(sp.snap)
 })
+document.addEventListener('keydown', (e) => {
+  if ($('#profilePanel').hidden || e.target.closest('input, textarea, select, [contenteditable]') || document.querySelector('dialog[open]')) return
+  if (e.key === 'Escape') closePanel()
+  else if (e.key === 'ArrowRight' && !$('#spNext').disabled) panelStep(1)
+  else if (e.key === 'ArrowLeft' && !$('#spPrev').disabled) panelStep(-1)
+  else return
+  e.preventDefault()
+})
+
+// ---------- video player ----------
+// Bluesky videos are HLS streams. Safari plays them itself; other browsers use hls.js, loaded the first
+// time a video is played (public/vendor). Click to play in place; ⤢ opens a large viewer.
+
+let hlsReady = null
+function loadHls() {
+  hlsReady ??= new Promise((resolve, reject) => {
+    const s = document.createElement('script')
+    s.src = 'vendor/hls.light.min.js'
+    s.onload = () => resolve(window.Hls)
+    s.onerror = () => {
+      hlsReady = null
+      reject(new Error("Couldn't load the video player"))
+    }
+    document.head.append(s)
+  })
+  return hlsReady
+}
+
+// Safari's own HLS playback is the best there (AirPlay, battery). Chrome and Edge also claim HLS support,
+// but it isn't reliable everywhere, so they use hls.js; built-in playback that fails falls back to it too.
+const SAFARI = /Safari/.test(navigator.userAgent) && !/Chrome|Chromium|Edg|Android|Firefox/.test(navigator.userAgent)
+
+async function attachStream(video, url) {
+  video._hls?.destroy()
+  video._hls = null
+  if (SAFARI && video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.src = url
+    video.addEventListener('error', () => attachHls(video, url).catch((err) => toast(err.message)), { once: true })
+    return
+  }
+  await attachHls(video, url)
+}
+
+async function attachHls(video, url) {
+  video.removeAttribute('src')
+  const Hls = await loadHls()
+  if (!Hls?.isSupported()) throw new Error("This browser can't play Bluesky videos")
+  const hls = new Hls({ capLevelToPlayerSize: true })
+  hls.loadSource(url)
+  hls.attachMedia(video)
+  video._hls = hls
+}
+
+async function playInline(box) {
+  if (box.querySelector('video')) return
+  const v = document.createElement('video')
+  v.controls = true
+  v.playsInline = true
+  v.preload = 'auto'
+  v.setAttribute('aria-label', box.dataset.alt || 'Video')
+  v.poster = box.querySelector('img')?.src ?? ''
+  box.querySelector('img, .video-blank')?.replaceWith(v)
+  box.querySelector('.video-play')?.remove()
+  box.classList.add('playing')
+  try {
+    await attachStream(v, box.dataset.video)
+    await v.play().catch(() => {}) // the controls are there if the browser blocks autoplay
+  } catch (err) {
+    toast(err.message)
+  }
+}
+
+async function openBigVideo(box) {
+  const inline = box.querySelector('video')
+  const at = inline?.currentTime ?? 0
+  inline?.pause()
+  const big = $('#videoBig')
+  big.setAttribute('aria-label', box.dataset.alt || 'Video')
+  $('#videoDialog').showModal()
+  try {
+    await attachStream(big, box.dataset.video)
+    if (at) big.addEventListener('loadedmetadata', () => (big.currentTime = at), { once: true })
+    await big.play().catch(() => {})
+  } catch (err) {
+    toast(err.message)
+  }
+}
+$('#videoDialog').addEventListener('close', () => {
+  const big = $('#videoBig')
+  big.pause()
+  big._hls?.destroy()
+  big._hls = null
+  big.removeAttribute('src')
+  big.load()
+})
+
+// Capture phase, so a click on a video doesn't also open the thread or quote it sits in
+document.addEventListener('click', (e) => {
+  const box = e.target.closest('.video[data-video]')
+  if (!box) return
+  const blurred = box.querySelector('img.blurred')
+  e.preventDefault()
+  e.stopPropagation()
+  if (blurred) return blurred.classList.remove('blurred') // first click shows a sensitive video's picture
+  if (e.target.closest('.video-expand')) return openBigVideo(box)
+  if (!e.target.closest('video')) playInline(box)
+}, true)
+
+// Only one video plays at a time
+document.addEventListener('play', (e) => {
+  for (const v of document.querySelectorAll('video')) if (v !== e.target && !v.paused) v.pause()
+}, true)
 
 // ---------- follows ----------
 
@@ -3659,7 +3949,7 @@ $('#profileCard').addEventListener('click', async (e) => {
       }
       case 'posts':
         closeProfileCard()
-        return showAuthor(did, p?.handle ?? did)
+        return openProfilePanel(did)
       case 'list':
         closeProfileCard()
         return openAddToList(did, p?.handle ?? did)

@@ -269,6 +269,22 @@
     <div class="sheet-body" id="adBody"></div>
   </dialog>
 
+  <aside id="profilePanel" class="side-panel" aria-label="Profile snapshot" hidden>
+    <div class="sp-bar">
+      <button type="button" class="icon-btn" id="spPrev" aria-label="Previous person" title="Previous (←)">←</button>
+      <span id="spPos" class="dim"></span>
+      <button type="button" class="icon-btn" id="spNext" aria-label="Next person" title="Next (→)">→</button>
+      <span class="sp-spacer"></span>
+      <button type="button" class="icon-btn" id="spClose" aria-label="Close" title="Close (Esc)">✕</button>
+    </div>
+    <div id="spBody" class="sp-body"></div>
+  </aside>
+
+  <dialog id="videoDialog" class="video-dialog">
+    <button type="button" class="icon-btn" data-close aria-label="Close">✕</button>
+    <video id="videoBig" controls playsinline></video>
+  </dialog>
+
   <div id="profileCard" class="profile-card" role="dialog" aria-label="Profile" hidden></div>
   <div id="shareMenu" class="share-menu" role="menu" hidden></div>
   <div id="toast" class="toast" role="status" hidden></div>
