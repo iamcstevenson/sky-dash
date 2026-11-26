@@ -86,6 +86,7 @@ The **Act as** buttons at the top choose which account likes, reposts, replies, 
 
 ### On every post
 
+- **Like as…:** when more than one of your accounts follows the author, the ♥ opens a menu to pick which account likes it (or remove a like), showing which accounts already have.
 - **Double-action warning:** if your other account already liked or reposted a post, Skydash asks before doing it again.
 - **Profile cards:** hover over a name or avatar on any tab, or tap it on a phone, to see their bio, follower counts, your 14-day stats on them, and whether they follow you: **Follows you** with the accounts they follow, or **Doesn't follow you**. From the card you can **Unfollow** or **Follow** from either account (with Undo), **Mute**, see **Their posts**, or open them in Bluesky.
 - **Share:** the arrow opens the same menu as bsky.app: **Copy link to post**, **Send via chat** (pick a recent chat or search for someone, and add a message if you like), and **Embed post** on wide screens, with a System, Light or Dark option. Posts whose authors hide them from logged-out viewers only offer Send via chat, with a note explaining why.
@@ -129,7 +130,7 @@ The tab shows one account at a time, following whichever account you're acting a
 
 - Add several keywords at once, separated by commas, and pick a group in **Save to** (or **New group…**) before clicking Add. Keywords you already have are just added to the group.
 - Or click several loose keywords to select them, then **Save as group…**. Typing an existing group's name adds them to it.
-- ⚙ on a group renames it and edits its keywords as a list, one per line. New ones are searched straight away. Removing one takes it out of the group, and deletes it only if you typed it into that group's list and it's in no other group.
+- ⚙ on a group renames it and lists every saved keyword to tick or untick (with a search box, and notes on which are paused or in other groups), plus a box for new ones, which are searched straight away. Unticking one takes it out of the group, and deletes it only if it was made for that group and is in no other group.
 - Click a group's name to see posts from all its keywords, with each post listed once. Clicking a keyword inside the group narrows that view.
 - ❚❚/▶ pauses or resumes the whole group, and 📡 puts all of it in or out of your custom Bluesky feed. Discover and Trending can be filtered by group.
 - Groups have no rules of their own: each keyword's ⚙ rules decide what it shows. Removing a group never deletes its keywords; − on a keyword takes it out of one group.
@@ -199,7 +200,7 @@ People you don't follow who **regularly** post or reply about your keywords, ran
 
 Filter by group or keyword (paused ones included, since their history still counts) and by Mostly posts or Mostly replies. Accounts posting dozens of matches a day are marked **high volume**, and ones calling themselves bots or feeds are marked **automated**; both rank lower. Every suggestion shows why it's there.
 
-- **Their posts** opens a side panel without losing your place: their profile, Follow / Audition / Not interested, and a snapshot from their last 100 posts: topics (bigger = more often), how much they post vs reply vs repost, posts per day and when (in your time zone), average likes and replies, the sites they link and who they talk with, then their recent posts. **←** / **→** step through the list; **Esc** closes it.
+- **Their posts** opens a side panel without losing your place: their profile, Follow / Audition / Not interested, and a snapshot from their last 100 posts: topics (bigger = more often), how much they post vs reply vs repost, posts per day and when (in your time zone), average likes and replies, the sites they link and who they talk with, then their recent posts, which you can like, repost, reply to and quote right there. **←** / **→** step through the list; **Esc** closes it.
 - The number at the right of each suggestion is its **ranking score**: 3 points per on-topic day, a few more for the number of on-topic posts, 2 per follow of yours who reshared them and 2 per expert who follows them (up to 5 each), reduced when only a small share of their posts are on-topic or they post dozens a day.
 - **Audition** collects their posts live without following them, and they aren't notified. The Auditioning list shows how many were on-topic, so you can **Follow** or **Drop** them later.
 - **Follow** from either account, or **Not interested** to stop suggesting them. Both have Undo.

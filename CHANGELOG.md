@@ -2,6 +2,9 @@
 
 ## November 2026
 
+- **Group editor lists every saved keyword** to tick, with a search box and a separate box for new ones.
+- **Discover panel posts** can be liked, reposted, replied to and quoted in place.
+- **Like as…:** pick which account likes a post when several of yours follow its author.
 - **Muted words:** a 🔇 box hides posts with chosen words, phrases or #tags from your feeds, kept in step with Bluesky's muted words on all your accounts.
 - **Follow pills are buttons:** click an A / B / C follow badge anywhere to unfollow or follow again.
 - **Hover cards say whether they follow you** ("Follows you" / "Doesn't follow you").

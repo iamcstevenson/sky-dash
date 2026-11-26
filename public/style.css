@@ -909,3 +909,15 @@ a.pc-btn:hover { text-decoration: none; border-color: var(--accent); }
 @media (min-width: 1280px) {
   .muted-box { position: fixed; left: 16px; top: 120px; width: 240px; max-height: calc(100vh - 140px); overflow-y: auto; margin: 0; z-index: 4; }
 }
+
+/* Group editor: saved keywords to tick */
+.group-picks { display: grid; gap: 2px; max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; margin-top: 6px; }
+.group-pick { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; cursor: pointer; font-weight: normal; }
+.group-pick[hidden] { display: none; }
+#groupFilter { margin-top: 6px; }
+/* Like as… menu */
+.like-as button { display: flex; align-items: center; justify-content: flex-start; gap: 6px; width: 100%; text-align: left; }
+.like-as button small { margin-left: auto; padding-left: 8px; }
+.like-as-title { font-size: 12px; padding: 4px 10px 2px; }
+.like-as .liked { color: #e0245e; }
+#groupFilter { width: 100%; font: inherit; padding: 5px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); }

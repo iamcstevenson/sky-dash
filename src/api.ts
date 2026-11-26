@@ -769,6 +769,13 @@ const routes: Record<string, Handler> = {
     return { post: views.get(uri), viewer: viewer.get(uri) ?? {} }
   },
 
+  // Several posts' views and every account's like/repost state (Discover panel's recent posts)
+  'GET /api/posts': async (q) => {
+    const uris = (q.get('uris') ?? '').split(',').filter((u) => u.startsWith('at://')).slice(0, 25)
+    const { views, viewer } = await hydrate(uris)
+    return { items: uris.filter((u) => views.has(u)).map((u) => ({ post: views.get(u), viewer: viewer.get(u) ?? {} })) }
+  },
+
   'POST /api/like': async (_q, b) => {
     const res = await account(b.slot).agent.like(b.uri, b.cid)
     forget(b.uri)
