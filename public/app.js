@@ -252,7 +252,7 @@ function renderActions(post, viewer) {
 }
 
 function renderCard(item) {
-  state.posts.set(item.post.uri, { post: item.post, viewer: item.viewer })
+  state.posts.set(item.post.uri, { post: item.post, viewer: item.viewer, followedBy: item.followedBy ?? [] })
   let ctx = ''
   if (item.root) {
     ctx += `<div class="ctx">${renderPost(item.root, { small: true })}</div>`
@@ -944,13 +944,39 @@ async function openGroup(id) {
     return
   }
   $('#adTitle').textContent = `Edit group “${g.name}”`
+  try {
+    const k = await api('/api/keywords') // current list, so every saved keyword can be ticked
+    state.kw.list = k.keywords
+    state.kw.groups = k.groups
+  } catch {}
+  // Every saved keyword, ticked when it's in this group, plus a box for new ones
+  const inGroup = new Set(g.keywords.map((k) => k.query.toLowerCase()))
+  const otherGroups = (k) => state.kw.groups.filter((x) => x.id !== id && x.keywordIds?.includes(k.id)).map((x) => x.name)
+  const all = [...state.kw.list].sort((a, b) => Number(inGroup.has(b.query.toLowerCase())) - Number(inGroup.has(a.query.toLowerCase())) || a.query.localeCompare(b.query))
   body.innerHTML = `
     <label class="rules-block"><b>Group name</b><input id="groupName" type="text" maxlength="60" value="${esc(g.name)}"></label>
-    <label class="rules-block"><b>Keywords</b><small>One per line (or separated by commas). New ones are searched straight away. Removing one takes it out of this group; it’s deleted only if you typed it here and it’s in no other group.</small>
-      <textarea id="groupQueries" rows="8">${esc(g.keywords.map((k) => k.query).join('\n'))}</textarea></label>
+    <div class="rules-block"><b>Keywords</b><small>Tick the saved keywords this group should show. Unticking one takes it out of this group; it’s deleted only if it was made for this group and is in no other group.</small>
+      ${all.length > 8 ? '<input id="groupFilter" type="search" placeholder="Find a keyword" autocomplete="off">' : ''}
+      <div class="group-picks" id="groupPicks">${all.length ? all.map((k) => {
+        const others = otherGroups(k)
+        return `<label class="group-pick" data-q="${esc(k.query.toLowerCase())}"><input type="checkbox" value="${esc(k.query)}" ${inGroup.has(k.query.toLowerCase()) ? 'checked' : ''}>
+          <span>${esc(k.query)}${k.enabled ? '' : ' <small class="dim">paused</small>'}${others.length ? ` <small class="dim">· in ${esc(others.join(', '))}</small>` : ''}</span></label>`
+      }).join('') : '<p class="dim">No saved keywords yet.</p>'}</div></div>
+    <label class="rules-block"><b>Add new keywords</b><small>One per line (or separated by commas). They're searched straight away.</small>
+      <textarea id="groupQueries" rows="3" placeholder="Big Blue Nation, #BBN"></textarea></label>
     <div class="group-warn" id="groupWarn" hidden></div>
     <div class="ad-foot"><button class="secondary" data-close>Cancel</button><button class="primary" id="groupSave">Save</button></div>`
-  const queries = () => $('#groupQueries').value.split(/[\n,]+/).map((t) => t.trim()).filter(Boolean)
+  const queries = () => {
+    const picked = [...body.querySelectorAll('#groupPicks input:checked')].map((c) => c.value)
+    const typed = $('#groupQueries').value.split(/[\n,]+/).map((t) => t.trim()).filter(Boolean)
+    const seen = new Set()
+    return [...picked, ...typed].filter((q) => !seen.has(q.toLowerCase()) && seen.add(q.toLowerCase()))
+  }
+  $('#groupFilter')?.addEventListener('input', (e) => {
+    const f = e.target.value.trim().toLowerCase()
+    body.querySelectorAll('.group-pick').forEach((el) => (el.hidden = !!f && !el.dataset.q.includes(f)))
+  })
+  $('#groupPicks').addEventListener('change', () => update())
   const known = new Map(state.kw.list.map((x) => [x.query.toLowerCase(), x]))
   const update = () => {
     const words = queries()
@@ -1400,6 +1426,7 @@ async function renderPanel(fresh = false) {
     sp.profile = profile
     sp.snap = snap
     $('#spBody').innerHTML = panelHeader(profile) + panelSnapshot(snap) + panelPosts(snap)
+    loadPanelActions()
   } catch (err) {
     if (sp.did === did) $('#spBody').innerHTML = `<p class="error">Couldn't load this profile: ${esc(err.message)}</p>`
   }
@@ -1476,10 +1503,32 @@ function panelPosts(s) {
   return `<div class="sp-section">
       <h4>Recent posts</h4>
       <div class="seg sp-seg"><button data-sp="originals" class="${sp.replies ? '' : 'on'}">Posts</button><button data-sp="replies" class="${sp.replies ? 'on' : ''}">Posts &amp; replies</button></div>
-      ${shown.length ? shown.map((p) => `<div class="card sp-post" data-open-thread="${esc(p.post.uri)}">${p.kind === 'reply' ? `<div class="dim sp-replyto">↩ Replying to @${esc(p.replyTo ?? 'someone')}</div>` : ''}${renderPost(p.post)}</div>`).join('')
+      ${shown.length ? shown.map((p) => {
+        const known = state.posts.get(p.post.uri)
+        return `<div class="card sp-post">${p.kind === 'reply' ? `<div class="dim sp-replyto">↩ Replying to @${esc(p.replyTo ?? 'someone')}</div>` : ''}${renderPost(known?.post ?? p.post)}
+          ${known ? renderActions(known.post, known.viewer) : `<div class="actions-pending" data-pending-uri="${esc(p.post.uri)}"></div>`}</div>`
+      }).join('')
         : '<p class="dim">Nothing here in their last 100.</p>'}
       ${list.length > sp.shown ? '<button class="link-btn" data-sp="more">Show 5 more</button>' : ''}
     </div>`
+}
+
+// Like / repost / reply / quote on the panel's posts: each account's state is read from Bluesky
+// (the snapshot is read logged out), then the buttons are drawn the same as in the feed
+async function loadPanelActions() {
+  const pending = [...document.querySelectorAll('#spBody [data-pending-uri]')]
+  if (!pending.length) return
+  const did = sp.did
+  try {
+    const { items } = await api(`/api/posts?uris=${encodeURIComponent(pending.map((el) => el.dataset.pendingUri).join(','))}`)
+    if (sp.did !== did) return
+    const followedBy = state.accounts.filter((a) => sp.profile?.relationship?.[a.slot]?.following).map((a) => a.slot)
+    for (const it of items) {
+      applyLocalActions(it.post, it.viewer)
+      state.posts.set(it.post.uri, { post: it.post, viewer: it.viewer, followedBy })
+      document.querySelectorAll(`#spBody [data-pending-uri="${CSS.escape(it.post.uri)}"]`).forEach((el) => (el.outerHTML = renderActions(it.post, it.viewer)))
+    }
+  } catch {}
 }
 
 function panelStep(dir, afterRemove = false) {
@@ -1517,6 +1566,7 @@ $('#profilePanel').addEventListener('click', (e) => {
   }
   const section = $('#spBody .sp-section:last-child')
   if (section && sp.snap) section.outerHTML = panelPosts(sp.snap)
+  loadPanelActions()
 })
 document.addEventListener('keydown', (e) => {
   if ($('#profilePanel').hidden || e.target.closest('input, textarea, select, [contenteditable]') || document.querySelector('dialog[open]')) return
@@ -1525,6 +1575,50 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'ArrowLeft' && !$('#spPrev').disabled) panelStep(-1)
   else return
   e.preventDefault()
+})
+
+// ---------- "Like as" menu ----------
+
+async function openLikeAs(btn, uri) {
+  closeLikeAs()
+  const r = btn.getBoundingClientRect() // before the refresh redraws the button
+  const fresh = await refreshPost(uri)
+  if (!fresh) return toast('That post is no longer available')
+  const known = state.posts.get(uri)
+  const followers = new Set(known?.followedBy ?? [])
+  const accts = [...state.accounts].sort((a, b) => Number(followers.has(b.slot)) - Number(followers.has(a.slot)) || a.slot - b.slot)
+  const menu = document.createElement('div')
+  menu.id = 'likeAsMenu'
+  menu.className = 'share-menu like-as'
+  menu.setAttribute('role', 'menu')
+  menu.innerHTML = `<div class="dim like-as-title">Like as…</div>` + accts.map((a) => {
+    const liked = !!fresh.viewer?.[a.slot]?.like
+    return `<button type="button" role="menuitem" data-like-as="${a.slot}">${badge(a.slot)} <span>${liked ? 'Remove like' : 'Like'} as @${esc(a.handle)}</span>${liked ? ' <span class="liked">♥</span>' : ''}${followers.has(a.slot) ? '' : ' <small class="dim">not following</small>'}</button>`
+  }).join('')
+  topLayerHost().append(menu)
+  menu.style.left = `${Math.min(Math.max(8, r.left), innerWidth - menu.offsetWidth - 8)}px`
+  const below = r.bottom + 4
+  menu.style.top = `${below + menu.offsetHeight > innerHeight - 8 ? Math.max(8, r.top - menu.offsetHeight - 4) : below}px`
+  menu.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-like-as]')
+    if (!b) return
+    e.stopPropagation()
+    closeLikeAs()
+    try {
+      await toggle(uri, 'like', Number(b.dataset.likeAs), true)
+    } catch (err) {
+      toast(err.message)
+    }
+  })
+}
+function closeLikeAs() {
+  document.getElementById('likeAsMenu')?.remove()
+}
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#likeAsMenu') && !e.target.closest('[data-act="like"]')) closeLikeAs()
+})
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeLikeAs()
 })
 
 // ---------- follow pills ----------
@@ -3003,7 +3097,7 @@ async function refreshPost(uri) {
   const fresh = await api(`/api/post?uri=${encodeURIComponent(uri)}`)
   if (!fresh.post) return null
   applyLocalActions(fresh.post, fresh.viewer)
-  state.posts.set(uri, fresh)
+  state.posts.set(uri, { ...state.posts.get(uri), ...fresh }) // keeps who follows the author
   document.querySelectorAll(`.actions[data-uri="${CSS.escape(uri)}"]`).forEach((el) => {
     el.outerHTML = renderActions(fresh.post, fresh.viewer)
   })
@@ -3013,7 +3107,8 @@ async function refreshPost(uri) {
 // Like or repost as the selected account, warning if the other account already did
 const togglesRunning = new Set()
 
-async function toggle(uri, kind) {
+// slot: an account picked from the "Like as" menu; otherwise the Act as account
+async function toggle(uri, kind, slot = state.actAs, picked = false) {
   // Redrawing replaces the button, so a quick second click could otherwise start a second like
   const running = `${uri}|${kind}`
   if (togglesRunning.has(running)) return
@@ -3022,7 +3117,6 @@ async function toggle(uri, kind) {
     const fresh = await refreshPost(uri)
     if (!fresh) return toast('That post is no longer available')
     const { post, viewer } = fresh
-    const slot = state.actAs
     const existing = viewer[slot]?.[kind]
     const verb = kind === 'like' ? 'liked' : 'reposted'
     const key = `${slot}|${uri}|${kind}`
@@ -3033,7 +3127,7 @@ async function toggle(uri, kind) {
       toast(`Removed ${kind} from ${acctName(slot)}`)
     } else {
       const others = whoDid(viewer, kind).filter((s) => s !== slot)
-      if (others.length && !confirm(`Already ${verb} by ${others.map(acctName).join(' and ')}.\n\n${kind === 'like' ? 'Like' : 'Repost'} it from ${acctName(slot)} too?`)) return
+      if (others.length && !picked && !confirm(`Already ${verb} by ${others.map(acctName).join(' and ')}.\n\n${kind === 'like' ? 'Like' : 'Repost'} it from ${acctName(slot)} too?`)) return
       const res = await api(`/api/${kind}`, { slot, uri, cid: post.cid })
       localActions.set(key, { value: res.uri, at: Date.now() })
       toast(`${kind === 'like' ? 'Liked' : 'Reposted'} as ${acctName(slot)}`)
@@ -3064,7 +3158,11 @@ document.addEventListener('click', async (e) => {
   btn.disabled = true
   try {
     switch (btn.dataset.act) {
-      case 'like': await toggle(uri, 'like'); break
+      case 'like':
+        // Followed from more than one of your accounts: choose which one likes it
+        if ((known?.followedBy?.length ?? 0) > 1) await openLikeAs(btn, uri)
+        else await toggle(uri, 'like')
+        break
       case 'repost': await toggle(uri, 'repost'); break
       case 'reply': openCompose({ replyTo: known?.post }); break
       case 'quote': openCompose({ quote: known?.post }); break
