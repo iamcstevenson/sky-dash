@@ -77,7 +77,7 @@ function plainText(text: string, facets: any[]): string {
   return out + dec.decode(bytes.slice(pos))
 }
 
-function extract(record: any, langs: string | null): string[] {
+export function extract(record: any, langs: string | null): string[] {
   const terms = new Set<string>()
   const facets: any[] = Array.isArray(record?.facets) ? record.facets : []
 
@@ -198,7 +198,7 @@ function corpus(sinceMs: number, who: string, english = false): Row[] {
   return rows
 }
 
-function labelFor(term: string): { kind: string; label: string } {
+export function labelFor(term: string): { kind: string; label: string } {
   if (term.startsWith('#')) return { kind: 'tag', label: term }
   if (term.startsWith('w:')) return { kind: 'word', label: labels.get(term) ?? term.slice(2) }
   if (term.startsWith('p:')) return { kind: 'phrase', label: labels.get(term) ?? term.slice(2) }

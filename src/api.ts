@@ -19,6 +19,7 @@ import { discover, dismiss, audition, auditionList, refreshDiscover, discoverSta
 import { uploadLimits, jobStatus, videoEmbed } from './video.ts'
 import { groupedNotifications, unreadCounts, markSeen, profilesFor, recentChats, searchPeople, sendPostViaChat } from './notifs.ts'
 import { syncState, syncDay } from './sync.ts'
+import { profileSnapshot } from './snapshot.ts'
 import { listDrafts, getDraft, saveDraft, deleteDraft, dismissReplaced, startPosting, finishPosting, place, scheduleDraft, dueDrafts, failScheduled } from './drafts.ts'
 
 type Query = URLSearchParams
@@ -299,6 +300,12 @@ const routes: Record<string, Handler> = {
 
   // ---------- follows ----------
 
+  // Discover side panel: topics, posting mix, links, who they talk with, rhythm and recent posts
+  'GET /api/snapshot': async (q) => {
+    const actor = q.get('actor')
+    if (!actor) throw new HttpError(400, 'actor is required')
+    return profileSnapshot(actor)
+  },
   'GET /api/profile': async (q) => {
     const actor = q.get('actor')
     if (!actor) throw new HttpError(400, 'actor is required')
