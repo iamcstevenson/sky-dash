@@ -90,6 +90,8 @@ The **Act as** buttons at the top choose which account likes, reposts, replies, 
 - **Profile cards:** hover over a name or avatar on any tab, or tap it on a phone, to see their bio, follower counts, your 14-day stats on them, and whether they follow you: **Follows you** with the accounts they follow, or **Doesn't follow you**. From the card you can **Unfollow** or **Follow** from either account (with Undo), **Mute**, see **Their posts**, or open them in Bluesky.
 - **Share:** the arrow opens the same menu as bsky.app: **Copy link to post**, **Send via chat** (pick a recent chat or search for someone, and add a message if you like), and **Embed post** on wide screens, with a System, Light or Dark option. Posts whose authors hide them from logged-out viewers only offer Send via chat, with a note explaining why.
 - **Videos** play in place when you click them; **⤢** opens a large viewer. Only one plays at a time.
+- **Follow pills:** the A / B / C badges that show you follow someone (on posts, in the Follows table, in the Discover panel) are buttons: click one to unfollow from that account, or click a faded one to follow again. Both have Undo.
+- **Muted words:** the 🔇 box (on the left on wide screens, a bar above the feed on phones; click its title to fold it away) hides posts containing a word, phrase or #tag from Following, Keywords, Lists and Trending. Matching is by whole word and ignores capitals; link cards and quoted posts count. Each entry shows how many posts from the last day it hides.
 - **English only** (on by default) hides posts in other languages in Following, Keywords and Trending. Posts go by their language label. For those with no label, Skydash looks at the text and keeps the post when unsure.
 
 ### Posting

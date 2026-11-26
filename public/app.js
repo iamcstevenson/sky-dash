@@ -69,6 +69,13 @@ function allLabel() {
   return state.accounts.length === 2 ? 'Both' : `All ${state.accounts.length}`
 }
 
+// A badge that says you follow someone from that account; click to unfollow (with Undo) or follow again.
+// label: optional word after the badge ("following"), as in the Discover panel.
+function followPill(did, slot, on = true, label = '') {
+  const title = on ? `You follow them from ${acctName(slot)}. Click to unfollow.` : `Click to follow from ${acctName(slot)}`
+  return `<button type="button" class="follow-pill ${on ? 'on' : ''} ${label ? 'pc-tag' : ''}" data-follow-pill data-did="${esc(did)}" data-slot="${slot}" data-label="${esc(label)}" title="${esc(title)}" aria-pressed="${on}">${badge(slot, title)}${label ? ` ${on ? esc(label) : 'follow'}` : ''}</button>`
+}
+
 function badge(slot, title) {
   return `<span class="acct-badge acct-${slot}" title="${esc(title ?? acctName(slot))}">${LETTERS[slot] ?? slot}</span>`
 }
@@ -187,7 +194,7 @@ function renderPost(post, { small = false, followedBy = [] } = {}) {
       <div class="meta">
         <span class="name" data-profile="${esc(a.did)}">${esc(a.displayName || a.handle)}</span>
         <span class="handle" data-profile="${esc(a.did)}">@${esc(a.handle)}</span>
-        ${followedBy.length ? `<span class="badges">${followedBy.map((s) => badge(s, `Followed by ${acctName(s)}`)).join('')}</span>` : ''}
+        ${followedBy.length ? `<span class="badges">${followedBy.map((s) => followPill(a.did, s)).join('')}</span>` : ''}
         <a class="time" href="${esc(postUrl(post))}" target="_blank" rel="noopener" title="${esc(new Date(post.indexedAt).toLocaleString())}">· ${ago(post.record?.createdAt ?? post.indexedAt)}</a>
       </div>
       <div class="text">${renderText(post.record?.text, post.record?.facets)}</div>
@@ -458,6 +465,7 @@ function showView(name) {
   $('#kwPanel').hidden = !isKeywords
   $('#followsView').hidden = !isFollows
   $('#trendPanel').hidden = !isTrending
+  $('#mutedBox').hidden = !(name === 'following' || isKeywords || isTrending || isLists) || !state.accounts.length
   document.body.classList.toggle('wide', isFollows)
   // Trending shows its own controls; its post list only appears once a topic is picked
   $('#filters').hidden = isFollows || isTrending || isDiscover || isNotifications || isLists
@@ -1401,7 +1409,7 @@ function panelHeader(p) {
   const rel = p.relationship ?? {}
   const following = state.accounts.filter((a) => rel[a.slot]?.following)
   const follows = state.accounts.map((a) => rel[a.slot]?.following
-    ? `<span class="pc-tag">${badge(a.slot)} following</span>`
+    ? followPill(p.did, a.slot, true, 'following')
     : `<button class="pc-btn follow" data-dv="follow" data-slot="${a.slot}" data-did="${esc(p.did)}">${badge(a.slot)} Follow</button>`).join('')
   const inDiscover = !!document.querySelector(`#discoverView .dv-row[data-did="${CSS.escape(p.did)}"]`)
   const auditioning = !!document.querySelector(`#dvAuditions .dv-row[data-did="${CSS.escape(p.did)}"]`)
@@ -1518,6 +1526,112 @@ document.addEventListener('keydown', (e) => {
   else return
   e.preventDefault()
 })
+
+// ---------- follow pills ----------
+
+async function setFollow(did, slot, on) {
+  const res = await api(`/api/follows/${on ? 'follow' : 'unfollow'}`, { dids: [did], slots: [slot] })
+  if (res.failed?.length) throw new Error(res.failed[0].error)
+  pc.cache.delete(did)
+  document.querySelectorAll(`[data-follow-pill][data-did="${CSS.escape(did)}"][data-slot="${slot}"]`).forEach((b) => {
+    b.outerHTML = followPill(did, slot, on, b.dataset.label)
+  })
+  markUnfollowed(did, on || state.accounts.some((a) => a.slot !== slot && document.querySelector(`[data-follow-pill].on[data-did="${CSS.escape(did)}"][data-slot="${a.slot}"]`)))
+}
+
+// Capture phase, so the click doesn't also open the post or the profile card underneath
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-follow-pill]')
+  if (!b) return
+  e.preventDefault()
+  e.stopPropagation()
+  const { did } = b.dataset
+  const slot = Number(b.dataset.slot)
+  const on = !b.classList.contains('on')
+  b.disabled = true
+  try {
+    await setFollow(did, slot, on)
+    toast(on ? `Followed from ${acctName(slot)}` : `Unfollowed from ${acctName(slot)}`, {
+      label: 'Undo',
+      run: () => setFollow(did, slot, !on).catch((err) => toast(err.message)),
+    })
+  } catch (err) {
+    b.disabled = false
+    toast(err.message)
+  }
+}, true)
+
+// ---------- muted words ----------
+
+const mutedOpenKey = 'mutedOpen'
+function mutedOpen() {
+  const saved = safeGet(mutedOpenKey)
+  return saved === null ? matchMedia('(min-width: 1280px)').matches : saved === '1'
+}
+function setMutedOpen(open) {
+  $('#mbBody').hidden = !open
+  $('#mbToggle').setAttribute('aria-expanded', String(open))
+  $('#mutedBox').classList.toggle('open', open)
+}
+
+function renderMuted(words) {
+  $('#mbCount').textContent = words.length ? `(${words.length})` : ''
+  $('#mbList').innerHTML = words.length
+    ? words.map((w) => `<li><span class="mb-word">${esc(w.text)}</span>
+        <small class="dim" title="Posts from the last day that this hides">${w.hiddenToday ? `${w.hiddenToday} today` : ''}</small>
+        <button type="button" class="icon-btn" data-unmute="${w.id}" aria-label="Unmute ${esc(w.text)}" title="Unmute">✕</button></li>`).join('')
+    : '<li class="dim">Nothing muted.</li>'
+}
+
+async function loadMuted() {
+  try {
+    renderMuted((await api('/api/muted')).words)
+  } catch {}
+}
+
+// After a change, show the current view again without the muted posts (or with the unmuted ones)
+function refreshAfterMute() {
+  if (['following', 'keywords', 'trending', 'lists'].includes(state.view)) showView(state.view)
+}
+
+$('#mbToggle').addEventListener('click', () => {
+  const open = $('#mbBody').hidden
+  safeSet(mutedOpenKey, open ? '1' : '0')
+  setMutedOpen(open)
+})
+$('#mbForm').addEventListener('submit', async (e) => {
+  e.preventDefault()
+  const text = $('#mbInput').value.trim()
+  if (!text) return
+  try {
+    renderMuted((await api('/api/muted/add', { text })).words)
+    $('#mbInput').value = ''
+    toast(`Muted “${text}”`)
+    refreshAfterMute()
+  } catch (err) {
+    toast(err.message)
+  }
+})
+$('#mbList').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-unmute]')
+  if (!b) return
+  const text = b.closest('li')?.querySelector('.mb-word')?.textContent ?? ''
+  try {
+    renderMuted((await api('/api/muted/remove', { id: Number(b.dataset.unmute) })).words)
+    toast(`Unmuted “${text}”`, {
+      label: 'Undo',
+      run: async () => {
+        renderMuted((await api('/api/muted/add', { text })).words)
+        refreshAfterMute()
+      },
+    })
+    refreshAfterMute()
+  } catch (err) {
+    toast(err.message)
+  }
+})
+setMutedOpen(mutedOpen())
+loadMuted()
 
 // ---------- video player ----------
 // Bluesky videos are HLS streams. Safari plays them itself; other browsers use hls.js, loaded the first
@@ -1818,7 +1932,7 @@ function renderFollows() {
         <div>${r.gone
           ? `<b class="gone" title="Bluesky no longer shows this profile">Deleted or deactivated</b><small>${esc(r.handle ? '@' + r.handle : r.did)}</small>`
           : `<b data-profile="${esc(r.did)}">${esc(r.displayName || r.handle || r.did)}</b><small data-profile="${esc(r.did)}">${r.handle ? '@' + esc(r.handle) : 'Loading profile…'}${r.muted.length ? ' · muted' : ''}</small>`}</div></div></td>
-      <td data-label="${isExt() ? 'You' : 'By'}">${r.followedBy.map((s) => badge(s)).join(' ') || (isExt() ? '<span class="dim">—</span>' : '')}</td>
+      <td data-label="${isExt() ? 'You' : 'By'}">${r.followedBy.map((s) => followPill(r.did, s)).join(' ') || (isExt() ? '<span class="dim">—</span>' : '')}</td>
       ${isGroup() ? `<td class="num" data-label="Followed by" title="${esc(groupWho(r))}">${r.groupCount} of ${groupSize()}</td>` : ''}
       <td class="num" data-label="Posts">${num(r.posts)}</td>
       <td class="num" data-label="Replies">${num(r.replies)}</td>

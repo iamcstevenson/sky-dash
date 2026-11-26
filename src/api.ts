@@ -20,6 +20,7 @@ import { uploadLimits, jobStatus, videoEmbed } from './video.ts'
 import { groupedNotifications, unreadCounts, markSeen, profilesFor, recentChats, searchPeople, sendPostViaChat } from './notifs.ts'
 import { syncState, syncDay } from './sync.ts'
 import { profileSnapshot } from './snapshot.ts'
+import { MUTED_SQL, anyMuted, postViewMuted, listMuted, addMuted, removeMuted } from './muted.ts'
 import { listDrafts, getDraft, saveDraft, deleteDraft, dismissReplaced, startPosting, finishPosting, place, scheduleDraft, dueDrafts, failScheduled } from './drafts.ts'
 
 type Query = URLSearchParams
@@ -78,6 +79,7 @@ function feedFilter(q: Query) {
   const type = q.get('type')
   if (type === 'posts') where.push('p.reply_parent IS NULL')
   if (type === 'replies') where.push('p.reply_parent IS NOT NULL')
+  if (anyMuted()) where.push(MUTED_SQL)
 
   // One person's posts don't need to come from someone you follow (e.g. an account you're auditioning)
   if (author) return { where, params }
@@ -117,6 +119,7 @@ function keywordFilter(q: Query) {
   if (type === 'posts') where.push('p.reply_parent IS NULL')
   if (type === 'replies') where.push('p.reply_parent IS NOT NULL')
   if (q.get('hideFollowed') === '1') where.push('p.author_did NOT IN (SELECT subject_did FROM follows)')
+  if (anyMuted()) where.push(MUTED_SQL)
   return { where, params }
 }
 
@@ -155,6 +158,7 @@ async function buildItems(rows: FeedRow[], limit: number) {
   for (const r of rows) {
     const post = views.get(r.uri)
     if (!post || post.author.viewer?.muted || post.author.viewer?.blocking || post.author.viewer?.blockedBy) continue
+    if (postViewMuted(post)) continue // muted word in its link card or quoted post, or a feed read from Bluesky
     items.push({
       post,
       parent: r.reply_parent ? (views.get(r.reply_parent) ?? { notFound: true, uri: r.reply_parent }) : undefined,
@@ -301,6 +305,11 @@ const routes: Record<string, Handler> = {
   // ---------- follows ----------
 
   // Discover side panel: topics, posting mix, links, who they talk with, rhythm and recent posts
+  // Muted words and phrases (left-hand box): posts containing them are left out of the feeds
+  'GET /api/muted': async () => listMuted(),
+  'POST /api/muted/add': async (_q, b) => addMuted(b),
+  'POST /api/muted/remove': async (_q, b) => removeMuted(b),
+
   'GET /api/snapshot': async (q) => {
     const actor = q.get('actor')
     if (!actor) throw new HttpError(400, 'actor is required')
