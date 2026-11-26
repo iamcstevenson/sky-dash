@@ -2,7 +2,7 @@
 
 ## November 2026
 
-- **Muted words:** a 🔇 box hides posts with chosen words, phrases or #tags from your feeds.
+- **Muted words:** a 🔇 box hides posts with chosen words, phrases or #tags from your feeds, kept in step with Bluesky's muted words on all your accounts.
 - **Follow pills are buttons:** click an A / B / C follow badge anywhere to unfollow or follow again.
 - **Hover cards say whether they follow you** ("Follows you" / "Doesn't follow you").
 - **Discover side panel.** "Their posts" opens a panel instead of leaving Discover: profile, Follow / Audition / Not interested, ← → to move through the list, and a snapshot from their last 100 posts (topics, posting mix, rhythm, reception, linked sites, who they talk with) above their recent posts.

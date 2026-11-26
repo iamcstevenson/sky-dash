@@ -16,6 +16,7 @@ import { startNotificationSync } from './notifications.ts'
 import { startDiscoverRefresh } from './discover.ts'
 import { uploadVideo } from './video.ts'
 import { receiveMedia, mediaFile } from './drafts.ts'
+import { startMutedSync } from './muted.ts'
 import { startProfileDetails } from './profileDetails.ts'
 import { pruneAnalyses } from './analyze.ts'
 
@@ -182,6 +183,7 @@ async function main() {
   startNotificationSync()
   startDiscoverRefresh()
   startScheduler()
+  startMutedSync()
   refreshProfileCounts().catch(() => {})
 
   // Re-sync follow lists every 6 hours in case changes were missed, and prune old posts hourly

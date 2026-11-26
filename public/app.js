@@ -1574,10 +1574,13 @@ function setMutedOpen(open) {
   $('#mutedBox').classList.toggle('open', open)
 }
 
-function renderMuted(words) {
+function renderMuted({ words, sync }) {
   $('#mbCount').textContent = words.length ? `(${words.length})` : ''
+  $('#mbSync').innerHTML = !sync?.accounts ? ''
+    : sync.error ? `<span class="err" title="${esc(sync.error)}">Couldn't sync with Bluesky; trying again in a few minutes</span>`
+    : `Shared with Bluesky's muted words on your ${sync.accounts === 1 ? 'account' : `${sync.accounts} accounts`}${sync.lastMs ? ` · synced ${ago(new Date(sync.lastMs).toISOString())} ago` : ''}`
   $('#mbList').innerHTML = words.length
-    ? words.map((w) => `<li><span class="mb-word">${esc(w.text)}</span>
+    ? words.map((w) => `<li><span class="mb-word">${esc(w.text)}${w.expiresAt ? ` <small class="dim">until ${esc(new Date(w.expiresAt).toLocaleDateString([], { month: 'short', day: 'numeric' }))}</small>` : ''}</span>
         <small class="dim" title="Posts from the last day that this hides">${w.hiddenToday ? `${w.hiddenToday} today` : ''}</small>
         <button type="button" class="icon-btn" data-unmute="${w.id}" aria-label="Unmute ${esc(w.text)}" title="Unmute">✕</button></li>`).join('')
     : '<li class="dim">Nothing muted.</li>'
@@ -1585,7 +1588,7 @@ function renderMuted(words) {
 
 async function loadMuted() {
   try {
-    renderMuted((await api('/api/muted')).words)
+    renderMuted(await api('/api/muted'))
   } catch {}
 }
 
@@ -1603,13 +1606,17 @@ $('#mbForm').addEventListener('submit', async (e) => {
   e.preventDefault()
   const text = $('#mbInput').value.trim()
   if (!text) return
+  const btn = $('#mbForm button')
+  btn.disabled = true
   try {
-    renderMuted((await api('/api/muted/add', { text })).words)
+    renderMuted(await api('/api/muted/add', { text }))
     $('#mbInput').value = ''
     toast(`Muted “${text}”`)
     refreshAfterMute()
   } catch (err) {
     toast(err.message)
+  } finally {
+    btn.disabled = false
   }
 })
 $('#mbList').addEventListener('click', async (e) => {
@@ -1617,11 +1624,12 @@ $('#mbList').addEventListener('click', async (e) => {
   if (!b) return
   const text = b.closest('li')?.querySelector('.mb-word')?.textContent ?? ''
   try {
-    renderMuted((await api('/api/muted/remove', { id: Number(b.dataset.unmute) })).words)
+    b.disabled = true
+    renderMuted(await api('/api/muted/remove', { id: Number(b.dataset.unmute) }))
     toast(`Unmuted “${text}”`, {
       label: 'Undo',
       run: async () => {
-        renderMuted((await api('/api/muted/add', { text })).words)
+        renderMuted(await api('/api/muted/add', { text }))
         refreshAfterMute()
       },
     })
@@ -1632,6 +1640,8 @@ $('#mbList').addEventListener('click', async (e) => {
 })
 setMutedOpen(mutedOpen())
 loadMuted()
+// Words added or removed in the Bluesky app reach the server every 10 minutes; pick them up here too
+setInterval(loadMuted, 5 * 60_000)
 
 // ---------- video player ----------
 // Bluesky videos are HLS streams. Safari plays them itself; other browsers use hls.js, loaded the first
