@@ -9,8 +9,11 @@ A free, self-hosted dashboard for one to four Bluesky accounts. It runs on your 
 - **Keywords:** feeds of public posts from anyone, with rules that pin down what a keyword means ("cardinals" = the St. Louis Cardinals).
 - **Follows:** 14-day stats for everyone you follow, with bulk unfollow, mute and move-to-list.
 - **Trending:** what's rising among the people you follow, with a summary of each topic.
-- **Discover:** people you don't follow who regularly post about your topics.
-- **Posting:** like, repost, reply and quote from either account, with images, video and alt text. Share any post the way bsky.app does.
+- **Discover:** people you don't follow who regularly post about your topics, with a side panel that sums up anyone from their last 100 posts.
+- **Posting:** like, repost, reply and quote from any of your accounts, with images, video and alt text. Posts wait 2 minutes so you can fix typos, or schedule them for later. Share any post the way bsky.app does.
+- **Videos** play right in the feed, with a large viewer.
+
+See [CHANGELOG.md](CHANGELOG.md) for what's new.
 
 Developed and run on macOS. It should work anywhere Node.js runs, but only macOS has been tried, and the background service below is macOS only.
 
@@ -79,19 +82,22 @@ To remove it completely, run the stop command, then delete `~/Library/LaunchAgen
 
 ## Using it
 
-The **Act as** buttons at the top choose which account likes, reposts, replies, quotes and posts. The theme button at the top right cycles Auto, Light and Dark.
+The **Act as** buttons at the top choose which account likes, reposts, replies, quotes and posts. **⚙** at the top right adds or removes accounts (up to 4, badges A–D) with an app password; Skydash checks it with Bluesky and restarts itself to pick the account up. The theme button cycles Auto, Light and Dark.
 
 ### On every post
 
 - **Double-action warning:** if your other account already liked or reposted a post, Skydash asks before doing it again.
 - **Profile cards:** hover over a name or avatar on any tab, or tap it on a phone, to see their bio, follower counts, your 14-day stats on them, and whether they follow each of your accounts. From the card you can **Unfollow** or **Follow** from either account (with Undo), **Mute**, see **Their posts**, or open them in Bluesky.
 - **Share:** the arrow opens the same menu as bsky.app: **Copy link to post**, **Send via chat** (pick a recent chat or search for someone, and add a message if you like), and **Embed post** on wide screens, with a System, Light or Dark option. Posts whose authors hide them from logged-out viewers only offer Send via chat, with a note explaining why.
+- **Videos** play in place when you click them; **⤢** opens a large viewer. Only one plays at a time.
 - **English only** (on by default) hides posts in other languages in Following, Keywords and Trending. Posts go by their language label. For those with no label, Skydash looks at the text and keeps the post when unsure.
 
 ### Posting
 
 - **Images:** up to 4 per post. Click **Add images**, paste one into the text box, or drag files onto the compose box. Each has its own **alt text** box, and Skydash asks before posting an image without one. Images are resized to fit Bluesky's 2 MB limit, and hidden photo metadata like GPS location is removed before upload. GIFs post as a still image.
 - **Video:** one per post, in MP4, MOV, WebM or MPEG, up to 3 minutes and 100 MB. It uploads as soon as you pick it, and **Post** turns on when Bluesky has finished processing it. Add alt text beside the preview. A post can have images or a video, not both. The "Posting as" account is locked while a video is attached, because the upload belongs to that account. Bluesky limits daily video uploads per account and requires a verified email.
+- **Post waits 2 minutes:** **Post** closes the box at once, and the post goes to Bluesky 2 minutes later, so you can still fix a typo (**Edit** on the message, or Drafts → Waiting to post). Replies and quotes work the same way. The server does the posting, so it goes out even if you close the page.
+- **Schedule:** **🕒 Schedule…** picks a date and time instead. **Drafts** shows ⏳ and how many posts are waiting; each can be edited, posted now, or cancelled (it stays a draft). A post that fails stays in Drafts with the reason.
 - **Drafts:** **Save draft** in the compose box keeps a post or reply, with its images or video, for later. **Drafts** next to **New post** lists them to edit, post or delete. Drafts are shared with the Hub iPhone app through Hub Agent. If both change the same draft before syncing, the newest edit wins, and the draft notes which version it replaced so you can still see it. Posted and deleted drafts stay listed for a week, so each side can see what happened to them.
 
 ### Following
@@ -191,7 +197,8 @@ People you don't follow who **regularly** post or reply about your keywords, ran
 
 Filter by group or keyword (paused ones included, since their history still counts) and by Mostly posts or Mostly replies. Accounts posting dozens of matches a day are marked **high volume**, and ones calling themselves bots or feeds are marked **automated**; both rank lower. Every suggestion shows why it's there.
 
-- **Their posts** opens their last 14 days, even though you don't follow them.
+- **Their posts** opens a side panel without losing your place: their profile, Follow / Audition / Not interested, and a snapshot from their last 100 posts: topics (bigger = more often), how much they post vs reply vs repost, posts per day and when (in your time zone), average likes and replies, the sites they link and who they talk with, then their recent posts. **←** / **→** step through the list; **Esc** closes it.
+- The number at the right of each suggestion is its **ranking score**: 3 points per on-topic day, a few more for the number of on-topic posts, 2 per follow of yours who reshared them and 2 per expert who follows them (up to 5 each), reduced when only a small share of their posts are on-topic or they post dozens a day.
 - **Audition** collects their posts live without following them, and they aren't notified. The Auditioning list shows how many were on-topic, so you can **Follow** or **Drop** them later.
 - **Follow** from either account, or **Not interested** to stop suggesting them. Both have Undo.
 
