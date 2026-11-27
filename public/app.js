@@ -10,7 +10,8 @@ const state = {
   author: null, // { did, handle } when the Following tab shows one person's posts
   englishOnly: safeGet('englishOnly') !== '0', // on unless turned off
   kw: { list: [], groups: [], group: null, selected: new Set(), hideFollowed: false, videosOnly: false, showHidden: false, hours: 48, polling: false },
-  type: 'all',
+  type: 'posts', // All / Posts / Replies for the tab on screen; each tab keeps its own (typeByView)
+  typeByView: { following: 'posts' }, // Following opens on Posts only; other tabs on All
   who: 'all',
   cursor: null,
   newest: 0,
@@ -379,15 +380,24 @@ const VIEWS = {
   },
 }
 VIEWS.videos = {
-  feed: '/api/videos/search',
+  feed: '/api/videos',
   count: null,
   query: () => new URLSearchParams({
-    q: vd.q, sort: vd.sort, hours: vd.hours, type: state.type,
-    ...(vd.links ? { links: '1' } : {}),
+    scope: vd.scope, q: vd.q, sort: vd.sort, hours: vd.hours, type: state.type,
+    ...(vd.links && vd.scope === 'following' ? { links: '1' } : {}),
     ...(state.englishOnly ? { lang: 'en' } : {}),
   }),
-  done: () => `That's every video Bluesky found for “${vd.q}”${vd.hours ? ` in the last ${vdHoursLabel(vd.hours)}` : ''}.`,
-  empty: () => vd.q ? `No videos found for “${vd.q}”${vd.hours ? ` in the last ${vdHoursLabel(vd.hours)}` : ''}. Try a longer time or fewer words.` : 'Search above to find videos.',
+  done: () => `That's every video${vd.q ? ` for “${vd.q.replace(/^"(.*)"$/, '$1')}”` : ''} ${vdWhere()}.`,
+  empty: () => `No videos${vd.q ? ` for “${vd.q.replace(/^"(.*)"$/, '$1')}”` : ''} ${vdWhere()}.${vd.hours && vd.hours < 720 ? ' Try a longer time.' : ''}`,
+  // First page: the word cloud and how many videos there are
+  loaded: (data) => {
+    if (data.cloud) {
+      vd.cloud = data.cloud
+      renderVideoCloud()
+    }
+    const n = data.total
+    $('#vdNote').textContent = n == null ? '' : `${n >= 10000 ? '10,000+' : n.toLocaleString()} video${n === 1 ? '' : 's'}${vd.q ? ` for “${vd.q.replace(/^"(.*)"$/, '$1')}”` : ''} ${vdWhere(data.sinceMs)}`
+  },
 }
 function viewedGroupProblem() {
   const g = state.kw.group && state.kw.groups.find((x) => x.id === state.kw.group)
@@ -416,19 +426,15 @@ async function loadFeed(reset = false) {
     $('#feed').innerHTML = ''
     $('#newBanner').hidden = true
   }
-  end.textContent = state.view === 'videos' ? 'Searching Bluesky for videos…' : 'Loading…'
+  end.textContent = state.view === 'videos' ? 'Finding videos…' : 'Loading…'
   try {
     const v = view()
-    if (state.view === 'videos' && !vd.q) {
-      state.done = true
-      end.textContent = v.empty()
-      return
-    }
     const q = v.query()
     if (state.cursor) q.set('before', state.cursor)
     const data = await api(`${v.feed}?${q}`)
     if (seq !== loadSeq) return
     if (reset) state.newest = data.items[0]?.sortAt ?? Date.now()
+    if (reset) v.loaded?.(data)
     const feed = $('#feed')
     const before = feed.children.length
     feed.insertAdjacentHTML('beforeend', data.items.map(renderCard).join(''))
@@ -482,6 +488,7 @@ document.querySelectorAll('.seg').forEach((seg) => {
     seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === btn))
     if (!seg.dataset.filter) return // segments with their own handlers (Trending, Videos, …)
     state[seg.dataset.filter] = btn.dataset.value
+    if (seg.dataset.filter === 'type') state.typeByView[state.view] = btn.dataset.value
     loadFeed(true)
   })
 })
@@ -516,6 +523,8 @@ $('#filtersToggle').addEventListener('click', (e) => {
 function showView(name) {
   state.view = name
   safeSet('view', name)
+  state.type = state.typeByView[name] ?? 'all'
+  document.querySelectorAll('.seg[data-filter="type"] button').forEach((b) => b.classList.toggle('on', b.dataset.value === state.type))
   if (name !== 'following') state.author = null
   document.querySelectorAll('.tab[data-tab]').forEach((t) => t.classList.toggle('active', t.dataset.tab === name))
   const isKeywords = name === 'keywords'
@@ -902,23 +911,38 @@ document.querySelectorAll('details.fold[id]').forEach((d) => {
 
 // ---------- videos ----------
 
-// Searches all of Bluesky for posts with a video. Recent searches and your keywords are one click away.
+// The newest videos from people you follow (or everyone), a cloud of the words they use, and search.
+// Recent searches and your keywords are one click away.
 const vd = {
   q: '',
+  scope: safeGet('vdScope') === 'everyone' ? 'everyone' : 'following',
   sort: safeGet('vdSort') === 'top' ? 'top' : 'latest',
-  hours: [24, 72, 168, 720, 0].includes(Number(safeGet('vdHours') ?? 72)) ? Number(safeGet('vdHours') ?? 72) : 72,
+  hours: [3, 24, 72, 168, 720, 0].includes(Number(safeGet('vdWindow') ?? 3)) ? Number(safeGet('vdWindow') ?? 3) : 3,
   links: safeGet('vdLinks') === '1',
+  cloud: [],
 }
 function vdHoursLabel(h) {
-  return { 24: 'day', 72: '3 days', 168: 'week', 720: 'month' }[h] ?? `${h} hours`
+  return { 3: '3 hours', 24: 'day', 72: '3 days', 168: 'week', 720: 'month' }[h] ?? `${h} hours`
+}
+// "from people you follow in the last 3 hours"; sinceMs widens it when the last 50 reach further back
+function vdWhere(sinceMs) {
+  const who = vd.scope === 'everyone' ? 'on Bluesky' : 'from people you follow'
+  if (!vd.hours) return `${who}${vd.scope === 'following' ? ' (Skydash keeps 15 days)' : ''}`
+  const want = Date.now() - vd.hours * 3_600_000
+  if (sinceMs && sinceMs < want - 60_000) return `${who} since ${ago(new Date(sinceMs).toISOString())} ago (the last 50)`
+  return `${who} in the last ${vdHoursLabel(vd.hours)}`
 }
 function recentVideoSearches() {
   try { return JSON.parse(safeGet('vdRecent') ?? '[]').filter((x) => typeof x === 'string') } catch { return [] }
 }
 
 function renderVideoControls() {
+  document.querySelectorAll('#vdScope button').forEach((b) => b.classList.toggle('on', b.dataset.value === vd.scope))
   document.querySelectorAll('#vdSort button').forEach((b) => b.classList.toggle('on', b.dataset.value === vd.sort))
   document.querySelectorAll('#vdHours button').forEach((b) => b.classList.toggle('on', Number(b.dataset.value) === vd.hours))
+  // Top needs Bluesky's ranking (Everyone); links can only be told apart in posts Skydash keeps (People I follow)
+  $('#vdSort').hidden = vd.scope !== 'everyone'
+  $('#vdLinksWrap').hidden = vd.scope !== 'following'
   $('#vdLinks').checked = vd.links
   if (document.activeElement !== $('#vdInput')) $('#vdInput').value = vd.q
   const recent = recentVideoSearches()
@@ -929,13 +953,29 @@ function renderVideoControls() {
   $('#vdChips').innerHTML =
     (recent.length ? `<div class="vd-row"><span class="dim">Recent:</span> ${recent.map(link).join('<span class="vd-sep">·</span>')} <button type="button" class="vd-clear" data-vd-clear title="Forget recent searches">clear</button></div>` : '') +
     (keywords.length ? `<div class="vd-row"><span class="dim">Your keywords:</span> ${keywords.map(link).join('<span class="vd-sep">·</span>')}</div>` : '')
-  $('#vdSaved').hidden = !recent.length && !keywords.length
-  $('#vdSavedSum').textContent = recent.length && keywords.length ? 'Recent searches and your keywords' : recent.length ? 'Recent searches' : 'Your keywords'
+  renderVideoCloud()
 }
 
-function searchVideosFor(q) {
+// Up to 20 words from the newest videos, bigger when more videos use them. Click to filter, again to clear.
+function renderVideoCloud() {
+  const el = $('#vdCloud')
+  const words = vd.cloud ?? []
+  if (!words.length) {
+    el.innerHTML = ''
+    return
+  }
+  const max = Math.max(...words.map((w) => w.count))
+  const min = Math.min(...words.map((w) => w.count))
+  const size = (n) => (max === min ? 2 : 1 + Math.round(((n - min) / (max - min)) * 3))
+  el.innerHTML = words
+    .map((w) => `<button type="button" class="vd-word s${size(w.count)} ${w.term.toLowerCase() === vd.q.toLowerCase() ? 'on' : ''}" data-vd-word="${esc(w.term)}" title="${w.count} videos — click to show only these">${esc(w.label)}</button>`)
+    .join('')
+}
+
+// typed: from the search box (kept in Recent); a cloud word isn't
+function searchVideosFor(q, typed = true) {
   vd.q = q.trim()
-  if (vd.q) safeSet('vdRecent', JSON.stringify([vd.q, ...recentVideoSearches().filter((r) => r.toLowerCase() !== vd.q.toLowerCase())].slice(0, 8)))
+  if (vd.q && typed) safeSet('vdRecent', JSON.stringify([vd.q, ...recentVideoSearches().filter((r) => r.toLowerCase() !== vd.q.toLowerCase())].slice(0, 8)))
   $('#vdInput').value = vd.q
   renderVideoControls()
   loadFeed(true)
@@ -945,6 +985,16 @@ $('#vdForm').addEventListener('submit', (e) => {
   e.preventDefault()
   searchVideosFor($('#vdInput').value)
 })
+// Clearing the box (its ✕ or deleting the text and pressing Enter) goes back to all videos
+$('#vdInput').addEventListener('search', () => {
+  if (!$('#vdInput').value && vd.q) searchVideosFor('')
+})
+$('#vdCloud').addEventListener('click', (e) => {
+  const w = e.target.closest('[data-vd-word]')
+  if (!w) return
+  const term = w.dataset.vdWord
+  searchVideosFor(term.toLowerCase() === vd.q.toLowerCase() ? '' : term, false)
+})
 $('#vdChips').addEventListener('click', (e) => {
   if (e.target.closest('[data-vd-clear]')) {
     safeSet('vdRecent', '[]')
@@ -953,20 +1003,24 @@ $('#vdChips').addEventListener('click', (e) => {
   const pick = e.target.closest('[data-vd-q]')
   if (pick) searchVideosFor(pick.dataset.vdQ)
 })
-for (const [id, key] of [['#vdSort', 'sort'], ['#vdHours', 'hours']]) {
+for (const [id, key, store] of [['#vdScope', 'scope', 'vdScope'], ['#vdSort', 'sort', 'vdSort'], ['#vdHours', 'hours', 'vdWindow']]) {
   $(id).addEventListener('click', (e) => {
     const b = e.target.closest('button[data-value]')
     if (!b) return
-    vd[key] = key === 'hours' ? Number(b.dataset.value) : b.dataset.value
-    safeSet(key === 'hours' ? 'vdHours' : 'vdSort', vd[key])
+    const value = key === 'hours' ? Number(b.dataset.value) : b.dataset.value
+    if (value === vd[key]) return
+    vd[key] = value
+    safeSet(store, vd[key])
+    vd.cloud = []
     renderVideoControls()
-    if (vd.q) loadFeed(true)
+    loadFeed(true)
   })
 }
 $('#vdLinks').addEventListener('change', (e) => {
   vd.links = e.target.checked
   safeSet('vdLinks', vd.links ? '1' : '0')
-  if (vd.q) loadFeed(true)
+  vd.cloud = []
+  loadFeed(true)
 })
 
 // ---------- keyword context rules ----------

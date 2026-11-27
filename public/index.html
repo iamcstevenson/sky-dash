@@ -68,27 +68,34 @@
 
     <section id="videoPanel" class="kw-panel" hidden>
       <form id="vdForm" class="kw-form">
-        <input id="vdInput" type="search" placeholder="Search Bluesky for video: Kentucky Louisville, #MarchMadness, Premier League goal" maxlength="300" autocomplete="off" aria-label="Search for videos">
+        <input id="vdInput" type="search" placeholder="Search videos: Kentucky Louisville, #MarchMadness, Premier League goal" maxlength="300" autocomplete="off" aria-label="Search for videos">
         <button type="submit" class="primary">Search</button>
       </form>
       <div class="trend-controls vd-controls">
-        <div class="seg" id="vdSort" aria-label="Order">
+        <div class="seg" id="vdScope" aria-label="Whose videos">
+          <button data-value="following" class="on">People I follow</button>
+          <button data-value="everyone">Everyone</button>
+        </div>
+        <div class="seg" id="vdSort" aria-label="Order" hidden>
           <button data-value="latest" class="on">Latest</button>
           <button data-value="top">Top</button>
         </div>
         <div class="seg" id="vdHours" aria-label="How far back">
+          <button data-value="3" class="on">3 hours</button>
           <button data-value="24">Day</button>
-          <button data-value="72" class="on">3 days</button>
+          <button data-value="72">3 days</button>
           <button data-value="168">Week</button>
           <button data-value="720">Month</button>
           <button data-value="0" title="No time limit">Any</button>
         </div>
-        <label class="check" title="Also show links to YouTube, Streamable, Twitch, TikTok and Vimeo"><input type="checkbox" id="vdLinks"> Include video links</label>
+        <label class="check" id="vdLinksWrap" title="Also show posts linking to YouTube, Streamable, Twitch, TikTok, Vimeo or Dailymotion"><input type="checkbox" id="vdLinks"> Include video links</label>
       </div>
-      <div class="kw-help">Searches all of Bluesky and shows only posts with a video, including posts quoting one. <b>Top</b> finds the most-watched clips, <b>Latest</b> the newest. Search syntax works: <code>"exact phrase"</code>, <code>-word</code>, <code>from:handle</code>, <code>#tag</code>.</div>
-      <details id="vdSaved" class="fold" open>
-        <summary id="vdSavedSum">Recent searches and your keywords</summary>
+      <div id="vdCloud" class="vd-cloud" aria-label="Words in these videos"></div>
+      <div id="vdNote" class="vd-note dim"></div>
+      <details id="vdSaved" class="fold">
+        <summary id="vdSavedSum">Recent searches, your keywords and tips</summary>
         <div id="vdChips" class="vd-chips"></div>
+        <div class="kw-help vd-help">Click a word above to see only videos using it; click it again for all. Search for anything with the box: <code>"exact phrase"</code>, <code>-word</code>, <code>#tag</code>. <b>Everyone</b> searches all of Bluesky (Latest or Top); <b>People I follow</b> searches the posts Skydash keeps from everyone your accounts follow.</div>
       </details>
     </section>
 
@@ -239,8 +246,8 @@
     <div class="filters" id="filters">
       <button type="button" class="secondary filters-toggle" id="filtersToggle" aria-expanded="false" aria-controls="filters">Filters</button>
       <div class="seg" data-filter="type">
-        <button data-value="all" class="on">All</button>
-        <button data-value="posts">Posts</button>
+        <button data-value="all">All</button>
+        <button data-value="posts" class="on">Posts</button>
         <button data-value="replies">Replies</button>
       </div>
       <div class="seg" data-filter="who" id="whoFilter"></div>

@@ -2,6 +2,8 @@
 
 ## November 2026
 
+- **Videos tab reworked:** opens on the newest videos from people you follow (or **Everyone** on Bluesky, using Bluesky's video-only search), with a cloud of up to 20 words to filter by. Adult-labeled posts are left out of Everyone.
+- **Following opens on Posts only.**
 - **Video links play in place:** YouTube, Dailymotion, Vimeo, Streamable, Twitch clips and TikTok links show as a full-width preview on every tab.
 - **Foldable lists:** the keyword list on Keywords and the recent/keyword links on Videos fold away to bring the posts up.
 - **Videos tab:** search all of Bluesky for video of sporting events (or anything else), newest or most popular, with recent searches and your keywords one click away. **Videos only** on the Keywords tab does the same for your saved keywords.
