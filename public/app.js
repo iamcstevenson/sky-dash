@@ -131,7 +131,39 @@ function renderImages(images, blur) {
     .join('')}</div>`
 }
 
-function renderMedia(embed, blur, post) {
+// Links to video sites play in the post, like Bluesky videos. Returns the site's embeddable player
+// (loaded only when you press play) and the video's shape, or null for any other link.
+function videoLinkPlayer(uri) {
+  let u
+  try { u = new URL(uri) } catch { return null }
+  const host = u.hostname.replace(/^(www|m)\./, '')
+  const path = u.pathname.split('/').filter(Boolean)
+  const id = (x) => (x && /^[\w-]+$/.test(x) ? x : null)
+  const seconds = (t) => {
+    if (!t) return 0
+    if (/^\d+$/.test(t)) return Number(t)
+    const m = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(t)
+    return m ? (Number(m[1] ?? 0) * 3600 + Number(m[2] ?? 0) * 60 + Number(m[3] ?? 0)) : 0
+  }
+  if (host === 'youtube.com' || host === 'youtu.be' || host === 'music.youtube.com') {
+    const v = host === 'youtu.be' ? id(path[0])
+      : ['shorts', 'live', 'embed'].includes(path[0]) ? id(path[1])
+      : path[0] === 'watch' ? id(u.searchParams.get('v')) : null
+    if (!v) return null
+    const start = seconds(u.searchParams.get('t') ?? u.searchParams.get('start'))
+    return { src: `https://www.youtube-nocookie.com/embed/${v}?autoplay=1&playsinline=1${start ? `&start=${start}` : ''}`, ar: path[0] === 'shorts' ? '9 / 16' : '16 / 9' }
+  }
+  if (host === 'vimeo.com' && /^\d+$/.test(path[0] ?? '')) return { src: `https://player.vimeo.com/video/${path[0]}?autoplay=1`, ar: '16 / 9' }
+  if (host === 'dailymotion.com' && path[0] === 'video' && id(path[1])) return { src: `https://www.dailymotion.com/embed/video/${path[1]}?autoplay=1`, ar: '16 / 9' }
+  if (host === 'dai.ly' && id(path[0])) return { src: `https://www.dailymotion.com/embed/video/${path[0]}?autoplay=1`, ar: '16 / 9' }
+  if (host === 'streamable.com' && id(path[0]) && path.length === 1) return { src: `https://streamable.com/e/${path[0]}?autoplay=1`, ar: '16 / 9' }
+  const clip = host === 'clips.twitch.tv' ? id(path[0]) : host === 'twitch.tv' && path[1] === 'clip' ? id(path[2]) : null
+  if (clip) return { src: `https://clips.twitch.tv/embed?clip=${clip}&parent=${location.hostname}&autoplay=true`, ar: '16 / 9' }
+  if (host === 'tiktok.com' && path[1] === 'video' && /^\d+$/.test(path[2] ?? '')) return { src: `https://www.tiktok.com/player/v1/${path[2]}?autoplay=1`, ar: '9 / 16' }
+  return null
+}
+
+function renderMedia(embed, blur, post, small = false) {
   if (!embed) return ''
   switch (embed.$type) {
     case 'app.bsky.embed.images#view':
@@ -140,6 +172,14 @@ function renderMedia(embed, blur, post) {
       const e = embed.external
       let host = ''
       try { host = new URL(e.uri).hostname } catch {}
+      const player = !small && videoLinkPlayer(e.uri)
+      if (player) {
+        // Full-width preview that plays here; the caption still links to the site
+        return `<div class="video vlink ${player.ar === '9 / 16' ? 'portrait' : ''}" data-embed="${esc(player.src)}" data-alt="${esc(e.title || 'Video')}" style="--ar: ${player.ar}">
+          <div class="vlink-media">${e.thumb ? `<img loading="lazy" src="${esc(e.thumb)}" alt="${esc(e.title ?? '')}" class="${blur ? 'blurred' : ''}">` : '<div class="video-blank"></div>'}
+          <button type="button" class="video-play" aria-label="Play video">▶</button></div>
+          <a class="vlink-cap" href="${esc(e.uri)}" target="_blank" rel="noopener" title="Open on ${esc(host.replace(/^www\./, ''))}"><b>${esc(e.title || e.uri)}</b><small>${esc(host.replace(/^www\./, ''))} ↗</small></a></div>`
+      }
       return `<a class="ext" href="${esc(e.uri)}" target="_blank" rel="noopener">
         ${e.thumb ? `<img loading="lazy" src="${esc(e.thumb)}" alt="">` : ''}
         <div><b>${esc(e.title || e.uri)}</b><small>${esc(e.description)}</small><small>${esc(host)}</small></div></a>`
@@ -175,13 +215,14 @@ function renderQuote(rec) {
   return ''
 }
 
-function renderEmbed(post) {
+// small: reply context and previews, where a video link stays a compact link card
+function renderEmbed(post, small = false) {
   const embed = post.embed
   if (!embed) return ''
   const blur = isSensitive(post.labels)
   if (embed.$type === 'app.bsky.embed.record#view') return renderQuote(embed.record)
-  if (embed.$type === 'app.bsky.embed.recordWithMedia#view') return renderMedia(embed.media, blur, post) + renderQuote(embed.record?.record)
-  return renderMedia(embed, blur, post)
+  if (embed.$type === 'app.bsky.embed.recordWithMedia#view') return renderMedia(embed.media, blur, post, small) + renderQuote(embed.record?.record)
+  return renderMedia(embed, blur, post, small)
 }
 
 // One post's header, text and embeds. `small` is used for reply context above a post.
@@ -198,7 +239,7 @@ function renderPost(post, { small = false, followedBy = [] } = {}) {
         <a class="time" href="${esc(postUrl(post))}" target="_blank" rel="noopener" title="${esc(new Date(post.indexedAt).toLocaleString())}">· ${ago(post.record?.createdAt ?? post.indexedAt)}</a>
       </div>
       <div class="text">${renderText(post.record?.text, post.record?.facets)}</div>
-      ${renderEmbed(post)}
+      ${renderEmbed(post, small)}
     </div></div>`
 }
 
@@ -581,6 +622,11 @@ function collapsedGroups() {
 function renderKeywords() {
   const el = $('#kwList')
   const { list, groups } = state.kw
+  // The fold's heading says what the posts below are from, for when the list is folded away
+  const group = state.kw.group && groups.find((g) => g.id === state.kw.group)
+  const picked = list.filter((k) => state.kw.selected.has(k.id)).map((k) => k.query)
+  const showing = [group?.name, picked.join(', ')].filter(Boolean).join(': ')
+  $('#kwFoldSum').textContent = `Your keywords and groups (${list.length})${showing ? ` · showing ${showing}` : ''}`
   const inAGroup = new Set(groups.flatMap((g) => g.keywordIds))
   const collapsed = collapsedGroups()
   const byId = new Map(list.map((k) => [k.id, k]))
@@ -845,6 +891,15 @@ $('#videosOnly').addEventListener('change', (e) => {
   loadFeed(true)
 })
 
+// ---------- folding sections ----------
+
+// details.fold with an id remember whether they were left open
+document.querySelectorAll('details.fold[id]').forEach((d) => {
+  const saved = safeGet(`fold:${d.id}`)
+  if (saved !== null) d.open = saved === '1'
+  d.addEventListener('toggle', () => safeSet(`fold:${d.id}`, d.open ? '1' : '0'))
+})
+
 // ---------- videos ----------
 
 // Searches all of Bluesky for posts with a video. Recent searches and your keywords are one click away.
@@ -869,11 +924,13 @@ function renderVideoControls() {
   const recent = recentVideoSearches()
   const lower = new Set(recent.map((r) => r.toLowerCase()))
   const keywords = state.kw.list.map((k) => k.query).filter((k) => !lower.has(k.toLowerCase()))
-  const chip = (q, kind) => `<span class="kw-chip ${q.toLowerCase() === vd.q.toLowerCase() ? 'selected' : ''}">
-    <button type="button" class="kw-name" data-vd-q="${esc(q)}" title="Search videos for ${esc(q)}">${esc(q)}</button>${kind === 'recent' ? `<button type="button" data-vd-forget="${esc(q)}" title="Remove from recent searches">✕</button>` : ''}</span>`
+  // Plain text links, small, so the results stay close to the search box
+  const link = (q) => `<button type="button" class="vd-link ${q.toLowerCase() === vd.q.toLowerCase() ? 'on' : ''}" data-vd-q="${esc(q)}" title="Search videos for ${esc(q)}">${esc(q)}</button>`
   $('#vdChips').innerHTML =
-    (recent.length ? `<div class="vd-row"><span class="dim">Recent:</span> ${recent.map((q) => chip(q, 'recent')).join('')}</div>` : '') +
-    (keywords.length ? `<div class="vd-row"><span class="dim">Your keywords:</span> ${keywords.map((q) => chip(q, 'keyword')).join('')}</div>` : '')
+    (recent.length ? `<div class="vd-row"><span class="dim">Recent:</span> ${recent.map(link).join('<span class="vd-sep">·</span>')} <button type="button" class="vd-clear" data-vd-clear title="Forget recent searches">clear</button></div>` : '') +
+    (keywords.length ? `<div class="vd-row"><span class="dim">Your keywords:</span> ${keywords.map(link).join('<span class="vd-sep">·</span>')}</div>` : '')
+  $('#vdSaved').hidden = !recent.length && !keywords.length
+  $('#vdSavedSum').textContent = recent.length && keywords.length ? 'Recent searches and your keywords' : recent.length ? 'Recent searches' : 'Your keywords'
 }
 
 function searchVideosFor(q) {
@@ -889,10 +946,8 @@ $('#vdForm').addEventListener('submit', (e) => {
   searchVideosFor($('#vdInput').value)
 })
 $('#vdChips').addEventListener('click', (e) => {
-  const forget = e.target.closest('[data-vd-forget]')
-  if (forget) {
-    const q = forget.dataset.vdForget.toLowerCase()
-    safeSet('vdRecent', JSON.stringify(recentVideoSearches().filter((r) => r.toLowerCase() !== q)))
+  if (e.target.closest('[data-vd-clear]')) {
+    safeSet('vdRecent', '[]')
     return renderVideoControls()
   }
   const pick = e.target.closest('[data-vd-q]')
@@ -1929,6 +1984,42 @@ $('#videoDialog').addEventListener('close', () => {
   big.load()
 })
 
+// A video-site link: swap the preview for the site's own player. Only one plays at a time, so any
+// other site player goes back to its preview and Bluesky videos pause.
+function stopLinkPlayers(except) {
+  for (const box of document.querySelectorAll('.vlink.playing')) {
+    if (box === except) continue
+    box.querySelector('iframe')?.replaceWith(box._preview ?? document.createElement('div'))
+    box.classList.remove('playing')
+    if (!box.querySelector('.video-play')) box.querySelector('.vlink-media').insertAdjacentHTML('beforeend', '<button type="button" class="video-play" aria-label="Play video">▶</button>')
+  }
+}
+function playLink(box) {
+  if (box.querySelector('iframe')) return
+  stopLinkPlayers(box)
+  for (const v of document.querySelectorAll('video')) if (!v.paused) v.pause()
+  const f = document.createElement('iframe')
+  f.src = box.dataset.embed
+  f.title = box.dataset.alt || 'Video'
+  f.allow = 'autoplay; encrypted-media; fullscreen; picture-in-picture'
+  f.allowFullscreen = true
+  f.referrerPolicy = 'strict-origin-when-cross-origin'
+  const preview = box.querySelector('img, .video-blank')
+  box._preview = preview
+  preview?.replaceWith(f)
+  box.querySelector('.video-play')?.remove()
+  box.classList.add('playing')
+}
+document.addEventListener('click', (e) => {
+  const box = e.target.closest('.vlink[data-embed]')
+  if (!box || e.target.closest('.vlink-cap, iframe')) return
+  e.preventDefault()
+  e.stopPropagation()
+  const blurred = box.querySelector('img.blurred')
+  if (blurred) return blurred.classList.remove('blurred')
+  playLink(box)
+}, true)
+
 // Capture phase, so a click on a video doesn't also open the thread or quote it sits in
 document.addEventListener('click', (e) => {
   const box = e.target.closest('.video[data-video]')
@@ -1944,6 +2035,7 @@ document.addEventListener('click', (e) => {
 // Only one video plays at a time
 document.addEventListener('play', (e) => {
   for (const v of document.querySelectorAll('video')) if (v !== e.target && !v.paused) v.pause()
+  stopLinkPlayers()
 }, true)
 
 // ---------- follows ----------

@@ -924,6 +924,35 @@ a.pc-btn:hover { text-decoration: none; border-color: var(--accent); }
 
 /* Videos tab */
 .vd-controls { margin: 10px 0 0; align-items: center; }
-.vd-chips { display: flex; flex-direction: column; gap: 6px; }
-.vd-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; }
-.vd-row .kw-chip button[data-vd-forget] { font-size: 11px; }
+.vd-chips { display: flex; flex-direction: column; gap: 4px; padding-top: 4px; }
+.vd-row { display: flex; flex-wrap: wrap; gap: 2px 0; align-items: baseline; font-size: 12px; line-height: 1.6; }
+.vd-row > .dim { margin-right: 6px; }
+.vd-link, .vd-clear { border: 0; background: none; padding: 0; font: inherit; color: var(--text); cursor: pointer; }
+.vd-link:hover, .vd-clear:hover { color: var(--accent); text-decoration: underline; }
+.vd-link.on { color: var(--accent); font-weight: 600; }
+.vd-sep { color: var(--muted); margin: 0 6px; }
+.vd-clear { color: var(--muted); margin-left: 10px; }
+
+/* A section that folds away to bring the posts closer; remembers open or closed */
+.fold > summary { cursor: pointer; font-size: 12px; color: var(--muted); list-style: none; user-select: none; padding: 2px 0; }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::before { content: '▸'; display: inline-block; width: 1.1em; transition: transform .15s; }
+.fold[open] > summary::before { transform: rotate(90deg); }
+.fold > summary:hover { color: var(--text); }
+
+/* Links to video sites (YouTube, Dailymotion, …): full-width preview that plays in the post */
+.vlink { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.vlink .vlink-media { position: relative; }
+.vlink img, .vlink .video-blank, .vlink iframe { border-radius: 0; }
+.vlink iframe { display: block; width: 100%; max-height: 480px; aspect-ratio: var(--ar, 16 / 9); border: 0; background: #000; }
+.vlink.portrait .vlink-media { width: min(100%, 300px); margin: 0 auto; }
+.vlink.portrait img, .vlink.portrait iframe, .vlink.portrait .video-blank { max-height: none; }
+.vlink.portrait .vlink-media { background: #000; }
+.vlink-cap { display: block; padding: 7px 10px; color: inherit; min-width: 0; }
+.vlink-cap b { display: block; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vlink-cap small { color: var(--muted); font-size: 12px; }
+.vlink-cap:hover b { text-decoration: underline; }
+
+.kw-fold { margin-top: 8px; }
+.kw-fold > .kw-help { margin-top: 4px; }
+#vdSaved { margin-top: 2px; }
