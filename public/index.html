@@ -55,11 +55,14 @@
         <select id="kwGroup" aria-label="Save to group" title="Save the new keywords to a group"><option value="">No group</option><option value="new">New group…</option></select>
         <button type="submit" class="primary">Add</button>
       </form>
-      <div class="kw-help">Words with spaces are searched as an exact phrase. Bluesky search syntax works too: <code>lang:en</code>, <code>-word</code>, <code>from:handle</code>. Click a keyword to show only its posts, double-click to edit it, and ⚙ sets what it should mean (e.g. “cardinals” = the St. Louis Cardinals). Click several loose keywords, then <b>Save as group</b>.</div>
-      <div id="kwList" class="kw-list"></div>
-      <details id="feedgenBox" class="feedgen">
-        <summary>Read this feed in the Bluesky app</summary>
-        <div id="feedgenBody"></div>
+      <details id="kwFold" class="fold kw-fold" open>
+        <summary id="kwFoldSum">Your keywords and groups</summary>
+        <div class="kw-help">Words with spaces are searched as an exact phrase. Bluesky search syntax works too: <code>lang:en</code>, <code>-word</code>, <code>from:handle</code>. Click a keyword to show only its posts, double-click to edit it, and ⚙ sets what it should mean (e.g. “cardinals” = the St. Louis Cardinals). Click several loose keywords, then <b>Save as group</b>.</div>
+        <div id="kwList" class="kw-list"></div>
+        <details id="feedgenBox" class="feedgen">
+          <summary>Read this feed in the Bluesky app</summary>
+          <div id="feedgenBody"></div>
+        </details>
       </details>
     </section>
 
@@ -83,7 +86,10 @@
         <label class="check" title="Also show links to YouTube, Streamable, Twitch, TikTok and Vimeo"><input type="checkbox" id="vdLinks"> Include video links</label>
       </div>
       <div class="kw-help">Searches all of Bluesky and shows only posts with a video, including posts quoting one. <b>Top</b> finds the most-watched clips, <b>Latest</b> the newest. Search syntax works: <code>"exact phrase"</code>, <code>-word</code>, <code>from:handle</code>, <code>#tag</code>.</div>
-      <div id="vdChips" class="vd-chips"></div>
+      <details id="vdSaved" class="fold" open>
+        <summary id="vdSavedSum">Recent searches and your keywords</summary>
+        <div id="vdChips" class="vd-chips"></div>
+      </details>
     </section>
 
     <section id="trendPanel" class="trend-panel" hidden>

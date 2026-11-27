@@ -46,7 +46,7 @@ The first start reads the last 14 days of posts from everyone you follow, which 
 
 ## Privacy and security
 
-- **Your data stays on your computer.** Posts, stats and sign-in sessions are stored in `data/skydash.db`. Skydash only talks to Bluesky's own services, and there's no analytics or outside server.
+- **Your data stays on your computer.** Posts, stats and sign-in sessions are stored in `data/skydash.db`. Skydash only talks to Bluesky's own services, and there's no analytics or outside server. The one exception is a video link you press play on: your browser then loads that site's player (YouTube, Dailymotion and so on).
 - **App passwords are stored unencrypted** in `.env` (or, for accounts added in the dashboard, in the database), and sign-in sessions in the database. Keep both private; `.gitignore` keeps them out of git. You can revoke an app password in Bluesky at any time.
 - **The dashboard has no login, and anyone who can reach it can post as you.** It only listens on your own computer (`127.0.0.1`) and refuses requests addressed to any other host name. Don't put it on the public internet. For phone access, use the private Tailscale setup below.
 - **The optional custom feed is public** by design, on its own port, and can't reach the dashboard.
@@ -92,6 +92,7 @@ The **Act as** buttons at the top choose which account likes, reposts, replies, 
 - **Profile cards:** hover over a name or avatar on any tab, or tap it on a phone, to see their bio, follower counts, your 14-day stats on them, and whether they follow you: **Follows you** with the accounts they follow, or **Doesn't follow you**. From the card you can **Unfollow** or **Follow** from either account (with Undo), **Mute**, see **Their posts**, or open them in Bluesky.
 - **Share:** the arrow opens the same menu as bsky.app: **Copy link to post**, **Send via chat** (pick a recent chat or search for someone, and add a message if you like), and **Embed post** on wide screens, with a System, Light or Dark option. Posts whose authors hide them from logged-out viewers only offer Send via chat, with a note explaining why.
 - **Videos** play in place when you click them; **⤢** opens a large viewer. Only one plays at a time.
+- **Video links** (YouTube, Dailymotion, Vimeo, Streamable, Twitch clips, TikTok) show as a full-width preview that plays in the post too; the caption under it opens the site. The site's player only loads when you press play, from your browser, so nothing reaches YouTube or the others until then. Reply context and previews keep the small link card.
 - **Follow pills:** the A / B / C badges that show you follow someone (on posts, in the Follows table, in the Discover panel) are buttons: click one to unfollow from that account, or click a faded one to follow again. Both have Undo.
 - **Muted words:** the 🔇 box (on the left on wide screens, a bar above the feed on phones; click its title to fold it away) hides posts containing a word, phrase or #tag from Following, Keywords, Lists and Trending. Matching is by whole word and ignores capitals; a plain word also hides it as a hashtag ("trump" hides "#Trump"), while "#tag" hides only the hashtag. Link cards and quoted posts count. Each entry shows how many posts from the last day it hides. The list is shared with the muted words in Bluesky's own settings for every account: adding or removing a word in Skydash does the same in Bluesky, and words added or removed in the Bluesky app show up here within 10 minutes (Bluesky's "for 7 days"-style mutes keep their end date).
 - **English only** (on by default) hides posts in other languages in Following, Keywords and Trending. Posts go by their language label. For those with no label, Skydash looks at the text and keeps the post when unsure.
@@ -126,6 +127,8 @@ The tab shows one account at a time, following whichever account you're acting a
 - Click a keyword to show only its posts. ❚❚ pauses it, ✕ removes it, and 📡 controls whether it's in your custom Bluesky feed.
 - **Hide people I follow** shows only accounts you don't follow yet.
 - Very common words are capped at the newest 2,000 matches per check (shown as "2,000+").
+
+Click **Your keywords and groups** under the box to fold the list away and bring the posts up; while it's folded, the heading says which keyword or group you're viewing.
 
 **Groups** are named, saved sets of keywords, like "UK Athletics":
 
@@ -166,7 +169,7 @@ Search all of Bluesky for video, such as highlights of a game: `Kentucky Louisvi
 - **Latest** shows the newest clips, **Top** the most popular. Pick how far back to look: a day, 3 days, a week, a month or any time.
 - **Include video links** also shows posts linking to YouTube, Streamable, Twitch, TikTok, Vimeo or Dailymotion.
 - Search syntax works as in Keywords: `"exact phrase"`, `-word`, `from:handle`, `#tag`. Unlike Keywords, words aren't quoted for you, so `Kentucky Louisville` finds posts with both words anywhere.
-- Your recent searches and your keywords sit under the box, one click each. Searches aren't saved or checked in the background; to follow a team over time, add it as a keyword and tick **Videos only**.
+- Your recent searches and your keywords sit under the box as small links, one click each; click the heading to fold them away (it stays folded). Searches aren't saved or checked in the background; to follow a team over time, add it as a keyword and tick **Videos only**.
 - Posts, Replies and English only work as on other tabs, and muted words apply. Each page looks through up to 1,000 posts; if those had no video, **Keep looking** reads further back.
 
 ### Follows

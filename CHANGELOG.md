@@ -2,6 +2,8 @@
 
 ## November 2026
 
+- **Video links play in place:** YouTube, Dailymotion, Vimeo, Streamable, Twitch clips and TikTok links show as a full-width preview on every tab.
+- **Foldable lists:** the keyword list on Keywords and the recent/keyword links on Videos fold away to bring the posts up.
 - **Videos tab:** search all of Bluesky for video of sporting events (or anything else), newest or most popular, with recent searches and your keywords one click away. **Videos only** on the Keywords tab does the same for your saved keywords.
 - **Group editor lists every saved keyword** to tick, with a search box and a separate box for new ones.
 - **Discover panel posts** can be liked, reposted, replied to and quoted in place.
