@@ -17,6 +17,7 @@ import { judgeRow, judge, rulesFor, saveRules, setAuthor, suggestedAuthors, sear
 import { listGroups, memberIds, setMembers, addMembers, createGroup, removeGroup, updateGroup, setKeywordGroups, removeFromGroup, keywordsFor, keepLooseKeywords, orderKeywords, orderGroups } from './groups.ts'
 import { discover, dismiss, audition, auditionList, refreshDiscover, discoverStatus, clearDiscoverCache } from './discover.ts'
 import { uploadLimits, jobStatus, videoEmbed } from './video.ts'
+import { searchVideos, HOURS as VIDEO_HOURS } from './videos.ts'
 import { groupedNotifications, unreadCounts, markSeen, profilesFor, recentChats, searchPeople, sendPostViaChat } from './notifs.ts'
 import { syncState, syncDay } from './sync.ts'
 import { profileSnapshot } from './snapshot.ts'
@@ -119,9 +120,14 @@ function keywordFilter(q: Query) {
   if (type === 'posts') where.push('p.reply_parent IS NULL')
   if (type === 'replies') where.push('p.reply_parent IS NOT NULL')
   if (q.get('hideFollowed') === '1') where.push('p.author_did NOT IN (SELECT subject_did FROM follows)')
+  if (q.get('media') === 'video') where.push(VIDEO_SQL)
   if (anyMuted()) where.push(MUTED_SQL)
   return { where, params }
 }
+
+// A stored post with a Bluesky video, on its own or alongside a quoted post
+const VIDEO_SQL = `(json_extract(p.embed, '$."$type"') = 'app.bsky.embed.video'
+  OR json_extract(p.embed, '$.media."$type"') = 'app.bsky.embed.video')`
 
 type FeedRow = {
   uri: string
@@ -710,6 +716,27 @@ const routes: Record<string, Handler> = {
       .all(...params) as { uri: string; author_did: string; record: string | null; kws: string | null }[]
     const wantHidden = q.get('show') === 'filtered'
     return { count: rows.filter((r) => judgeRow(r).kept.length > 0 === !wantHidden).length }
+  },
+
+  // ---------- videos ----------
+
+  // Searches all of Bluesky and returns only posts with a video. before = Bluesky's cursor for the next page.
+  'GET /api/videos/search': async (q) => {
+    const query = String(q.get('q') ?? '').trim().slice(0, 300)
+    if (!query) throw new HttpError(400, 'Enter something to search for')
+    const hours = Number(q.get('hours'))
+    const { rows, cursor, scanned } = await searchVideos({
+      q: query,
+      sort: q.get('sort') === 'top' ? 'top' : 'latest',
+      hours: VIDEO_HOURS.includes(hours) ? hours : 72,
+      links: q.get('links') === '1',
+      english: q.get('lang') === 'en',
+      type: q.get('type') ?? 'all',
+      cursor: q.get('before') || undefined,
+      limit: 20,
+    })
+    const out = await buildItems(rows, Math.max(rows.length, 1))
+    return { items: out.items, cursor, scanned }
   },
 
   // ---------- custom Bluesky feed ----------

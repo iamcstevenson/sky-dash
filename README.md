@@ -8,6 +8,7 @@ A free, self-hosted dashboard for one to four Bluesky accounts. It runs on your 
 - **Notifications:** grouped notifications, modeled on Bluesky's new notifications beta.
 - **Keywords:** feeds of public posts from anyone, with rules that pin down what a keyword means ("cardinals" = the St. Louis Cardinals).
 - **Follows:** 14-day stats for everyone you follow, with bulk unfollow, mute and move-to-list.
+- **Videos:** search all of Bluesky for video of a game, race or match, newest or most popular first.
 - **Trending:** what's rising among the people you follow, with a summary of each topic.
 - **Discover:** people you don't follow who regularly post about your topics, with a side panel that sums up anyone from their last 100 posts.
 - **Posting:** like, repost, reply and quote from any of your accounts, with images, video and alt text. Posts wait 2 minutes so you can fix typos, or schedule them for later. Share any post the way bsky.app does.
@@ -154,6 +155,19 @@ Each keyword shows how many matches are shown and hidden. **Show hidden posts** 
 3. In the Keywords tab, open **Read this feed in the Bluesky app** and click **Publish feed**.
 
 Only the feed server on port 4748 is public, and it answers just the three requests Bluesky makes. The feed follows your context rules, and it only updates while Skydash is running.
+
+**Videos only** (next to Hide people I follow) narrows any keyword or group to posts with a Bluesky video.
+
+### Videos
+
+Search all of Bluesky for video, such as highlights of a game: `Kentucky Louisville`, `#MarchMadness`, `Premier League goal`.
+
+- Only posts with a video are shown, including posts that quote one. Videos play in place, with ⤢ for the large viewer.
+- **Latest** shows the newest clips, **Top** the most popular. Pick how far back to look: a day, 3 days, a week, a month or any time.
+- **Include video links** also shows posts linking to YouTube, Streamable, Twitch, TikTok, Vimeo or Dailymotion.
+- Search syntax works as in Keywords: `"exact phrase"`, `-word`, `from:handle`, `#tag`. Unlike Keywords, words aren't quoted for you, so `Kentucky Louisville` finds posts with both words anywhere.
+- Your recent searches and your keywords sit under the box, one click each. Searches aren't saved or checked in the background; to follow a team over time, add it as a keyword and tick **Videos only**.
+- Posts, Replies and English only work as on other tabs, and muted words apply. Each page looks through up to 1,000 posts; if those had no video, **Keep looking** reads further back.
 
 ### Follows
 
