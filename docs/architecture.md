@@ -26,6 +26,7 @@ Each account's PDS ────────┘                │
 | `backfill.ts` | On startup, reads what was missed while off (14 days on first run). |
 | `hydrate.ts` | Turns stored post URIs into full post views, with each account's like/repost state. |
 | `api.ts` | All `/api/*` routes the page uses. |
+| `videos.ts` | Videos tab: one-off `searchPosts` calls (nothing stored), reading up to 10 pages per request and keeping posts with a video embed, a quoted video or (optionally) a video-site link. The search's post views seed the hydrate cache. |
 | `keywords.ts`, `rules.ts`, `groups.ts` | Keyword search every 2 minutes (multi-word text quoted as a phrase), per-keyword context rules, keyword groups as saved sets. |
 | `follows.ts`, `notifications.ts` | Follow stats and follow-graph actions; interaction history from notifications. |
 | `lists.ts` | Curated lists: list, create, rename, delete, copy, members, list feeds, and which of your lists each account is on (read from the accounts' own records). |

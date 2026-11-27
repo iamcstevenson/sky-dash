@@ -103,8 +103,8 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .acct-3 { --acct-color: var(--acct-3); }
 .acct-4 { --acct-color: var(--acct-4); }
 
-.tabs { display: flex; gap: 4px; padding: 8px 16px 0; max-width: 720px; margin: 0 auto; overflow-x: auto; }
-.tab { border: 0; background: none; padding: 8px 12px; border-bottom: 2px solid transparent; color: var(--muted); white-space: nowrap; }
+.tabs { display: flex; gap: 0; padding: 8px 16px 0; max-width: 720px; margin: 0 auto; overflow-x: auto; }
+.tab { border: 0; background: none; padding: 8px 10px; border-bottom: 2px solid transparent; color: var(--muted); white-space: nowrap; }
 .tab.active { color: var(--text); border-color: var(--accent); font-weight: 600; }
 
 main { max-width: 720px; margin: 0 auto; padding: 12px 16px 80px; }
@@ -655,7 +655,7 @@ a.pc-btn:hover { text-decoration: none; border-color: var(--accent); }
   .tab {
     position: relative; flex: 1 1 0; min-width: 0;
     display: flex; flex-direction: column; align-items: center; gap: 2px;
-    padding: 4px 0 2px; border-bottom: 0; font-size: 10.5px; font-weight: 500;
+    padding: 4px 0 2px; border-bottom: 0; font-size: 10px; font-weight: 500;
   }
   .tab.active { color: var(--accent); font-weight: 600; }
   .tab-ico { display: block; width: 22px; height: 22px; }
@@ -921,3 +921,9 @@ a.pc-btn:hover { text-decoration: none; border-color: var(--accent); }
 .like-as-title { font-size: 12px; padding: 4px 10px 2px; }
 .like-as .liked { color: #e0245e; }
 #groupFilter { width: 100%; font: inherit; padding: 5px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); }
+
+/* Videos tab */
+.vd-controls { margin: 10px 0 0; align-items: center; }
+.vd-chips { display: flex; flex-direction: column; gap: 6px; }
+.vd-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; }
+.vd-row .kw-chip button[data-vd-forget] { font-size: 11px; }

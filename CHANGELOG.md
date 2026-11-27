@@ -2,6 +2,7 @@
 
 ## November 2026
 
+- **Videos tab:** search all of Bluesky for video of sporting events (or anything else), newest or most popular, with recent searches and your keywords one click away. **Videos only** on the Keywords tab does the same for your saved keywords.
 - **Group editor lists every saved keyword** to tick, with a search box and a separate box for new ones.
 - **Discover panel posts** can be liked, reposted, replied to and quoted in place.
 - **Like as…:** pick which account likes a post when several of yours follow its author.

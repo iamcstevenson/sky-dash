@@ -17,6 +17,12 @@ export function forget(uri: string) {
   for (const key of cache.keys()) if (key.endsWith(`|${uri}`)) cache.delete(key)
 }
 
+// Caches post views this account already has (e.g. from a search), so hydrate() doesn't fetch them again
+export function remember(account: Account, views: PostView[]) {
+  const now = Date.now()
+  for (const v of views) cache.set(`${account.slot}|${v.uri}`, { at: now, view: v })
+}
+
 async function fetchViews(account: Account, uris: string[]): Promise<Map<string, PostView>> {
   const out = new Map<string, PostView>()
   const missing: string[] = []
