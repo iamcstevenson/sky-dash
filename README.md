@@ -8,7 +8,7 @@ A free, self-hosted dashboard for one to four Bluesky accounts. It runs on your 
 - **Notifications:** grouped notifications, modeled on Bluesky's new notifications beta.
 - **Keywords:** feeds of public posts from anyone, with rules that pin down what a keyword means ("cardinals" = the St. Louis Cardinals).
 - **Follows:** 14-day stats for everyone you follow, with bulk unfollow, mute and move-to-list.
-- **Videos:** search all of Bluesky for video of a game, race or match, newest or most popular first.
+- **Videos:** the newest videos from people you follow or all of Bluesky, a cloud of the words they use to filter by, and search.
 - **Trending:** what's rising among the people you follow, with a summary of each topic.
 - **Discover:** people you don't follow who regularly post about your topics, with a side panel that sums up anyone from their last 100 posts.
 - **Posting:** like, repost, reply and quote from any of your accounts, with images, video and alt text. Posts wait 2 minutes so you can fix typos, or schedule them for later. Share any post the way bsky.app does.
@@ -107,7 +107,7 @@ The **Act as** buttons at the top choose which account likes, reposts, replies, 
 
 ### Following
 
-One feed of posts and replies from the last 72 hours, filtered by type and by which account follows the author. Each reply shows the post it answers, and **Thread** opens the whole conversation. A banner appears when new posts arrive.
+One feed of posts and replies from the last 72 hours, filtered by type and by which account follows the author. It opens on **Posts** only; **All** adds replies. Each tab remembers its own All / Posts / Replies choice until the page is reloaded. Each reply shows the post it answers, and **Thread** opens the whole conversation. A banner appears when new posts arrive.
 
 ### Notifications
 
@@ -163,14 +163,16 @@ Only the feed server on port 4748 is public, and it answers just the three reque
 
 ### Videos
 
-Search all of Bluesky for video, such as highlights of a game: `Kentucky Louisville`, `#MarchMadness`, `Premier League goal`.
+The newest videos, with a cloud of the words they use, and search.
 
-- Only posts with a video are shown, including posts that quote one. Videos play in place, with ⤢ for the large viewer.
-- **Latest** shows the newest clips, **Top** the most popular. Pick how far back to look: a day, 3 days, a week, a month or any time.
-- **Include video links** also shows posts linking to YouTube, Streamable, Twitch, TikTok, Vimeo or Dailymotion.
-- Search syntax works as in Keywords: `"exact phrase"`, `-word`, `from:handle`, `#tag`. Unlike Keywords, words aren't quoted for you, so `Kentucky Louisville` finds posts with both words anywhere.
-- Your recent searches and your keywords sit under the box as small links, one click each; click the heading to fold them away (it stays folded). Searches aren't saved or checked in the background; to follow a team over time, add it as a keyword and tick **Videos only**.
-- Posts, Replies and English only work as on other tabs, and muted words apply. Each page looks through up to 1,000 posts; if those had no video, **Keep looking** reads further back.
+- **People I follow** (the default) shows videos from everyone your accounts follow, newest first. It reads the posts Skydash already keeps, so it's instant. With **3 hours** picked it always shows at least the last 50 videos, reaching further back if needed.
+- **Everyone** shows the newest videos on all of Bluesky, using the same search as bsky.app's Filters → "Only posts with videos". Posts Bluesky labels as adult, or tagged like it (#nsfw and so on), are left out. **Latest** or **Top** order the results.
+- **How far back:** 3 hours (the default), a day, 3 days, a week, a month or any time. Skydash keeps 15 days of posts, so for People I follow "any time" means those 15 days.
+- **Word cloud:** up to 20 names, phrases and #tags used by the most videos in view (at least 2 each), bigger when more use them. Words are only picked when they're written like names (Kentucky, NFL, LeBron James), not everyday words like "game". For Everyone it comes from the newest 500 videos. Click a word to show only videos using it; click it again for all.
+- **Search** for anything with the box: `Kentucky Louisville`, `"exact phrase"`, `-word`, `#tag`. For People I follow, words match whole words in the post, its link card and the video's description.
+- **Include video links** (People I follow only) also counts posts linking to YouTube, Streamable, Twitch, TikTok, Vimeo or Dailymotion. Bluesky's video search only knows videos uploaded to Bluesky.
+- Under the cloud, **Recent searches, your keywords and tips** folds open with your last searches and your keywords as small links. To follow a team over time, add it as a keyword and tick **Videos only** on the Keywords tab.
+- Posts, Replies and English only work as on other tabs, and muted words apply.
 
 ### Follows
 

@@ -956,3 +956,17 @@ a.pc-btn:hover { text-decoration: none; border-color: var(--accent); }
 .kw-fold { margin-top: 8px; }
 .kw-fold > .kw-help { margin-top: 4px; }
 #vdSaved { margin-top: 2px; }
+
+/* Videos: word cloud from the newest videos; click a word to filter */
+.vd-cloud { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; margin: 10px 2px 2px; line-height: 1.35; }
+.vd-cloud:empty { display: none; }
+.vd-word { border: 0; background: none; padding: 0; font: inherit; color: var(--text); cursor: pointer; }
+.vd-word:hover { color: var(--accent); text-decoration: underline; }
+.vd-word.s1 { font-size: 12px; color: var(--muted); }
+.vd-word.s2 { font-size: 14px; }
+.vd-word.s3 { font-size: 17px; font-weight: 500; }
+.vd-word.s4 { font-size: 20px; font-weight: 600; }
+.vd-word.on { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+.vd-note { font-size: 12px; margin: 6px 2px 2px; }
+.vd-note:empty { display: none; }
+.vd-help { margin-top: 6px; }

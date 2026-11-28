@@ -17,7 +17,7 @@ import { judgeRow, judge, rulesFor, saveRules, setAuthor, suggestedAuthors, sear
 import { listGroups, memberIds, setMembers, addMembers, createGroup, removeGroup, updateGroup, setKeywordGroups, removeFromGroup, keywordsFor, keepLooseKeywords, orderKeywords, orderGroups } from './groups.ts'
 import { discover, dismiss, audition, auditionList, refreshDiscover, discoverStatus, clearDiscoverCache } from './discover.ts'
 import { uploadLimits, jobStatus, videoEmbed } from './video.ts'
-import { searchVideos, HOURS as VIDEO_HOURS } from './videos.ts'
+import { videoPage, HOURS as VIDEO_HOURS } from './videos.ts'
 import { groupedNotifications, unreadCounts, markSeen, profilesFor, recentChats, searchPeople, sendPostViaChat } from './notifs.ts'
 import { syncState, syncDay } from './sync.ts'
 import { profileSnapshot } from './snapshot.ts'
@@ -720,23 +720,23 @@ const routes: Record<string, Handler> = {
 
   // ---------- videos ----------
 
-  // Searches all of Bluesky and returns only posts with a video. before = Bluesky's cursor for the next page.
-  'GET /api/videos/search': async (q) => {
-    const query = String(q.get('q') ?? '').trim().slice(0, 300)
-    if (!query) throw new HttpError(400, 'Enter something to search for')
+  // Videos tab: the newest videos from people you follow (scope=following) or everyone, optionally
+  // searched (q). The first page of an unsearched view carries the word cloud. before = next page cursor.
+  'GET /api/videos': async (q) => {
     const hours = Number(q.get('hours'))
-    const { rows, cursor, scanned } = await searchVideos({
-      q: query,
+    const out = await videoPage({
+      scope: q.get('scope') === 'everyone' ? 'everyone' : 'following',
+      q: String(q.get('q') ?? '').trim().slice(0, 300),
       sort: q.get('sort') === 'top' ? 'top' : 'latest',
-      hours: VIDEO_HOURS.includes(hours) ? hours : 72,
+      hours: VIDEO_HOURS.includes(hours) ? hours : 3,
       links: q.get('links') === '1',
       english: q.get('lang') === 'en',
       type: q.get('type') ?? 'all',
-      cursor: q.get('before') || undefined,
-      limit: 20,
+      before: q.get('before') || undefined,
+      limit: 30,
     })
-    const out = await buildItems(rows, Math.max(rows.length, 1))
-    return { items: out.items, cursor, scanned }
+    const built = await buildItems(out.rows, Math.max(out.rows.length, 1))
+    return { items: built.items, cursor: out.cursor, total: out.total, sinceMs: out.sinceMs, cloud: out.cloud }
   },
 
   // ---------- custom Bluesky feed ----------

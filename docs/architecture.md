@@ -26,7 +26,7 @@ Each account's PDS ────────┘                │
 | `backfill.ts` | On startup, reads what was missed while off (14 days on first run). |
 | `hydrate.ts` | Turns stored post URIs into full post views, with each account's like/repost state. |
 | `api.ts` | All `/api/*` routes the page uses. |
-| `videos.ts` | Videos tab: one-off `searchPosts` calls (nothing stored), reading up to 10 pages per request and keeping posts with a video embed, a quoted video or (optionally) a video-site link. The search's post views seed the hydrate cache. |
+| `videos.ts` | Videos tab. People I follow: stored posts with a video embed (`video_kind()` SQL function), searched locally. Everyone: `app.bsky.feed.searchPostsV2` with `hasVideo` (its lexicon is added at runtime, as the installed `@atproto/api` predates it; called through the signed-in agent with an `atproto-proxy` header to the AppView). That endpoint refuses `since` without a query, so the word-less view cuts off by time itself. Word cloud from Trending's `extract()`, name-like terms only, adult-labeled posts dropped; Everyone's is cached 5 minutes. |
 | `keywords.ts`, `rules.ts`, `groups.ts` | Keyword search every 2 minutes (multi-word text quoted as a phrase), per-keyword context rules, keyword groups as saved sets. |
 | `follows.ts`, `notifications.ts` | Follow stats and follow-graph actions; interaction history from notifications. |
 | `lists.ts` | Curated lists: list, create, rename, delete, copy, members, list feeds, and which of your lists each account is on (read from the accounts' own records). |
