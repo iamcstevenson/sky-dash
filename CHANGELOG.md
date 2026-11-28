@@ -2,6 +2,7 @@
 
 ## November 2026
 
+- **Videos fixes:** opens on Posts only; clicking a #tag word on Everyone no longer fails ("Invalid request"); pages no longer come up empty with **Keep looking** when hidden posts (adult, blocked, muted) fill a page; swear words kept out of the cloud; the cloud stays put while a word is picked.
 - **Videos tab reworked:** opens on the newest videos from people you follow (or **Everyone** on Bluesky, using Bluesky's video-only search), with a cloud of up to 20 words to filter by. Adult-labeled posts are left out of Everyone.
 - **Following opens on Posts only.**
 - **Video links play in place:** YouTube, Dailymotion, Vimeo, Streamable, Twitch clips and TikTok links show as a full-width preview on every tab.

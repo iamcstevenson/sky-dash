@@ -107,7 +107,7 @@ The **Act as** buttons at the top choose which account likes, reposts, replies, 
 
 ### Following
 
-One feed of posts and replies from the last 72 hours, filtered by type and by which account follows the author. It opens on **Posts** only; **All** adds replies. Each tab remembers its own All / Posts / Replies choice until the page is reloaded. Each reply shows the post it answers, and **Thread** opens the whole conversation. A banner appears when new posts arrive.
+One feed of posts and replies from the last 72 hours, filtered by type and by which account follows the author. It opens on **Posts** only (so does Videos); **All** adds replies. Each tab remembers its own All / Posts / Replies choice until the page is reloaded. Each reply shows the post it answers, and **Thread** opens the whole conversation. A banner appears when new posts arrive.
 
 ### Notifications
 
@@ -169,10 +169,10 @@ The newest videos, with a cloud of the words they use, and search.
 - **Everyone** shows the newest videos on all of Bluesky, using the same search as bsky.app's Filters → "Only posts with videos". Posts Bluesky labels as adult, or tagged like it (#nsfw and so on), are left out. **Latest** or **Top** order the results.
 - **How far back:** 3 hours (the default), a day, 3 days, a week, a month or any time. Skydash keeps 15 days of posts, so for People I follow "any time" means those 15 days.
 - **Word cloud:** up to 20 names, phrases and #tags used by the most videos in view (at least 2 each), bigger when more use them. Words are only picked when they're written like names (Kentucky, NFL, LeBron James), not everyday words like "game". For Everyone it comes from the newest 500 videos. Click a word to show only videos using it; click it again for all.
-- **Search** for anything with the box: `Kentucky Louisville`, `"exact phrase"`, `-word`, `#tag`. For People I follow, words match whole words in the post, its link card and the video's description.
+- **Search** for anything with the box: `Kentucky Louisville`, `"exact phrase"`, `-word`, `#tag`. For People I follow, words match whole words in the post, its link card and the video's description; `#tag` matches only the hashtag, while a plain word also matches it as a hashtag.
 - **Include video links** (People I follow only) also counts posts linking to YouTube, Streamable, Twitch, TikTok, Vimeo or Dailymotion. Bluesky's video search only knows videos uploaded to Bluesky.
 - Under the cloud, **Recent searches, your keywords and tips** folds open with your last searches and your keywords as small links. To follow a team over time, add it as a keyword and tick **Videos only** on the Keywords tab.
-- Posts, Replies and English only work as on other tabs, and muted words apply.
+- Posts (the default), All, Replies and English only work as on other tabs, and muted words apply. Posts from accounts you block or mute are left out too; when that thins a page, Skydash reads further so the page isn't empty.
 
 ### Follows
 

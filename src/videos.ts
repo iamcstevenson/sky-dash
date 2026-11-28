@@ -54,9 +54,11 @@ type Matcher = (haystack: string) => boolean
 function escapeRe(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
+// "#tag" matches only the hashtag; a plain word also matches it as a hashtag
 function wordRe(term: string) {
+  const tag = term.startsWith('#')
   const t = term.replace(/^#/, '')
-  return new RegExp(`(^|[^\\p{L}\\p{N}_])#?${escapeRe(t)}($|[^\\p{L}\\p{N}_])`, 'iu')
+  return new RegExp(`(^|[^\\p{L}\\p{N}_#])${tag ? '#' : '#?'}${escapeRe(t)}($|[^\\p{L}\\p{N}_])`, 'iu')
 }
 function matcher(query: string): Matcher | null {
   const want: RegExp[] = []
@@ -100,7 +102,9 @@ function isAdult(labels: any[] | undefined, record: any): boolean {
 const FILLER = new Set(('video videos clip clips watch watching watched link links check free live full new today tonight day days time ' +
   'got get two one three first second last next self play playing played drop dropped finish finished guys love follow following like ' +
   'see look make made need want going gonna know really people thing things way good great best better big little back done stream ' +
-  'streaming twitch youtube tiktok channel subscribe share post posted posting thread enjoy fun moment moments part episode').split(' '))
+  'streaming twitch youtube tiktok channel subscribe share post posted posting thread enjoy fun moment moments part episode ' +
+  'fuck fucking fucked shit damn hell wtf omg lol lmao lmfao rofl ass bitch crap yes yeah yep nope wow oh ok okay hey hi bro dude ' +
+  'please thanks thank happy sorry true real holy jesus god').split(' '))
 
 type CloudWord = { term: string; label: string; count: number }
 
@@ -169,6 +173,7 @@ const SEARCH_V2_LEXICON = {
         type: 'params',
         properties: {
           query: { type: 'string' },
+          hashtags: { type: 'array', items: { type: 'string' } },
           sort: { type: 'string', knownValues: ['recent', 'top'] },
           since: { type: 'string' },
           allTime: { type: 'boolean' },
@@ -205,6 +210,17 @@ async function searchV2(account: Account, params: Record<string, unknown>) {
   ensureLexicon(account)
   const res = await account.agent.call(SEARCH_V2, params, undefined, { headers: { 'atproto-proxy': APPVIEW } })
   return res.data as { posts: PostView[]; cursor?: string; hitsTotal?: number }
+}
+
+// A search that's only #tags counts as no search words to Bluesky, which then refuses a start time.
+// Sending the tags as words plus a hashtag filter finds the same posts and takes a time range.
+function queryParams(q: string): Record<string, unknown> {
+  const tokens = q.split(/\s+/).filter(Boolean)
+  if (tokens.length && tokens.every((t) => /^#[\p{L}\p{N}_]+$/u.test(t))) {
+    const tags = tokens.map((t) => t.slice(1))
+    return { query: tags.join(' '), hashtags: tags }
+  }
+  return { query: q }
 }
 
 // ---------- the view ----------
@@ -296,7 +312,7 @@ export async function videoPage(v: VideoQuery) {
     limit: Math.min(v.limit, 100),
   }
   // Bluesky only takes a start time alongside search words; without words, older posts are cut off here
-  if (v.q) params.query = v.q
+  if (v.q) Object.assign(params, queryParams(v.q))
   if (v.q && v.hours) params.since = new Date(Date.now() - v.hours * 3_600_000).toISOString()
   if (!v.hours || v.hours > 168) params.allTime = true
   if (v.english) params.languages = ['en']
