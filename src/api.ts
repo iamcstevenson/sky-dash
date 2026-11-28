@@ -17,7 +17,7 @@ import { judgeRow, judge, rulesFor, saveRules, setAuthor, suggestedAuthors, sear
 import { listGroups, memberIds, setMembers, addMembers, createGroup, removeGroup, updateGroup, setKeywordGroups, removeFromGroup, keywordsFor, keepLooseKeywords, orderKeywords, orderGroups } from './groups.ts'
 import { discover, dismiss, audition, auditionList, refreshDiscover, discoverStatus, clearDiscoverCache } from './discover.ts'
 import { uploadLimits, jobStatus, videoEmbed } from './video.ts'
-import { videoPage, HOURS as VIDEO_HOURS } from './videos.ts'
+import { videoPage, HOURS as VIDEO_HOURS, type VideoQuery } from './videos.ts'
 import { groupedNotifications, unreadCounts, markSeen, profilesFor, recentChats, searchPeople, sendPostViaChat } from './notifs.ts'
 import { syncState, syncDay } from './sync.ts'
 import { profileSnapshot } from './snapshot.ts'
@@ -724,7 +724,7 @@ const routes: Record<string, Handler> = {
   // searched (q). The first page of an unsearched view carries the word cloud. before = next page cursor.
   'GET /api/videos': async (q) => {
     const hours = Number(q.get('hours'))
-    const out = await videoPage({
+    const ask: VideoQuery = {
       scope: q.get('scope') === 'everyone' ? 'everyone' : 'following',
       q: String(q.get('q') ?? '').trim().slice(0, 300),
       sort: q.get('sort') === 'top' ? 'top' : 'latest',
@@ -734,9 +734,19 @@ const routes: Record<string, Handler> = {
       type: q.get('type') ?? 'all',
       before: q.get('before') || undefined,
       limit: 30,
-    })
-    const built = await buildItems(out.rows, Math.max(out.rows.length, 1))
-    return { items: built.items, cursor: out.cursor, total: out.total, sinceMs: out.sinceMs, cloud: out.cloud }
+    }
+    const out = await videoPage(ask)
+    const items = (await buildItems(out.rows, Math.max(out.rows.length, 1))).items
+    // Posts can drop out after Bluesky returns them (adult, from someone you blocked or muted, deleted).
+    // Rather than show an empty or thin page while more exist, read on (up to 5 pages).
+    let cursor = out.cursor
+    for (let round = 0; items.length < 10 && cursor && round < 4; round++) {
+      const next = await videoPage({ ...ask, before: cursor }).catch(() => null)
+      if (!next) break // show what there is; scrolling tries the next page again
+      items.push(...(await buildItems(next.rows, Math.max(next.rows.length, 1))).items)
+      cursor = next.cursor
+    }
+    return { items, cursor, total: out.total, sinceMs: out.sinceMs, cloud: out.cloud }
   },
 
   // ---------- custom Bluesky feed ----------

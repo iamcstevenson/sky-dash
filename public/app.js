@@ -11,7 +11,7 @@ const state = {
   englishOnly: safeGet('englishOnly') !== '0', // on unless turned off
   kw: { list: [], groups: [], group: null, selected: new Set(), hideFollowed: false, videosOnly: false, showHidden: false, hours: 48, polling: false },
   type: 'posts', // All / Posts / Replies for the tab on screen; each tab keeps its own (typeByView)
-  typeByView: { following: 'posts' }, // Following opens on Posts only; other tabs on All
+  typeByView: { following: 'posts', videos: 'posts' }, // Following and Videos open on Posts only; other tabs on All
   who: 'all',
   cursor: null,
   newest: 0,
@@ -391,7 +391,8 @@ VIEWS.videos = {
   empty: () => `No videos${vd.q ? ` for “${vd.q.replace(/^"(.*)"$/, '$1')}”` : ''} ${vdWhere()}.${vd.hours && vd.hours < 720 ? ' Try a longer time.' : ''}`,
   // First page: the word cloud and how many videos there are
   loaded: (data) => {
-    if (data.cloud) {
+    // While a word is picked the cloud stays as it was, so the word doesn't vanish from under you
+    if (data.cloud && (!vd.q || !vd.cloud?.length)) {
       vd.cloud = data.cloud
       renderVideoCloud()
     }
